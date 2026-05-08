@@ -56,10 +56,19 @@ namespace
 ////////////////////////////////////////////////////////////
 + (SFAppDelegate*)getInstance
 {
-    NSAssert(delegateInstance,
-             @"SFAppDelegate instance is nil, this means SFML was not properly initialized. "
-             "Make sure that the file defining your main() function includes <SFML/Main.hpp>");
-    
+    // Lazy fallback for the embedded case where SFML doesn't own
+    // the UIApplication delegate (host app drives UIApplicationMain
+    // itself). Without this, every `[SFAppDelegate getInstance]`
+    // call site would assert. The lazy instance owns the same state
+    // (motion manager, sfWindow pointer, backingScaleFactor) but its
+    // UIApplicationDelegate methods are never invoked by UIKit
+    // because the host's delegate handles those.
+    if (!delegateInstance)
+    {
+        delegateInstance = [[SFAppDelegate alloc] init];
+        [delegateInstance initBackingScale];
+        delegateInstance.motionManager = [[CMMotionManager alloc] init];
+    }
     return delegateInstance;
 }
 
