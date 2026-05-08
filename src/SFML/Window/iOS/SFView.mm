@@ -28,16 +28,8 @@
 #include <SFML/Window/iOS/SFView.hpp>
 #include <SFML/Window/iOS/SFAppDelegate.hpp>
 #include <SFML/System/Utf.hpp>
-#include <QuartzCore/CAEAGLLayer.h>
+#include <QuartzCore/CAMetalLayer.h>
 #include <cstring>
-
-#if defined(__APPLE__)
-    #if defined(__clang__)
-        #pragma clang diagnostic ignored "-Wdeprecated-declarations"
-    #elif defined(__GNUC__)
-        #pragma GCC diagnostic ignored "-Wdeprecated-declarations"
-    #endif
-#endif
 
 @interface SFView()
 
@@ -179,7 +171,11 @@
 ////////////////////////////////////////////////////////////
 + (Class)layerClass
 {
-    return [CAEAGLLayer class];
+    // ANGLE-backed: SFML's GL context now uses ANGLE which renders
+    // through a CAMetalLayer instead of EAGL/CAEAGLLayer. Same
+    // visual result; runs on iOS where Apple has been deprecating
+    // the OpenGL ES framework path.
+    return [CAMetalLayer class];
 }
 
 ////////////////////////////////////////////////////////////
@@ -194,13 +190,13 @@
         self.context = NULL;
         self.touches = [NSMutableArray array];
 
-        // Configure the EAGL layer
-        CAEAGLLayer* eaglLayer = static_cast<CAEAGLLayer*>(self.layer);
-        eaglLayer.opaque = YES;
-        eaglLayer.drawableProperties = [NSDictionary dictionaryWithObjectsAndKeys:
-                                        [NSNumber numberWithBool:FALSE], kEAGLDrawablePropertyRetainedBacking,
-                                        kEAGLColorFormatRGBA8, kEAGLDrawablePropertyColorFormat,
-                                        nil];
+        // Configure the Metal layer for ANGLE consumption.
+        // CAMetalLayer is opaque-by-default; framebuffer-only flag
+        // off because SFML's GL code may glReadPixels for screen-
+        // capture or post-processing.
+        CAMetalLayer* metalLayer = (CAMetalLayer*)self.layer;
+        metalLayer.opaque = YES;
+        metalLayer.framebufferOnly = NO;
 
         // Enable user interactions on the view (multi-touch events)
         self.userInteractionEnabled = true;

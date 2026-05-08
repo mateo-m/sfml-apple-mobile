@@ -23,6 +23,28 @@
 ////////////////////////////////////////////////////////////
 
 ////////////////////////////////////////////////////////////
+// EaglContext-via-ANGLE.
+//
+// Class name kept for source-compat with SFML's
+// `sf::priv::GlContext::createImpl` factory in GlContext.cpp;
+// implementation rewritten on top of ANGLE / EGL so the iOS
+// build doesn't depend on Apple's deprecated OpenGLES framework
+// (EAGLContext, CAEAGLLayer). ANGLE translates GLES2 calls into
+// Metal at runtime, which is what Apple supports going forward.
+//
+// Window-attached contexts get an EGLSurface backed by the
+// associated SFView's CAMetalLayer (see SFView.mm where
+// +layerClass returns CAMetalLayer). Offscreen / shared
+// contexts use a pbuffer surface instead. Frame swap is
+// `eglSwapBuffers` rather than [m_context presentRenderbuffer:].
+//
+// SFML's render code (sf::Texture, sf::Sprite, sf::Shader) calls
+// portable GLES2 entry points through the glad-loaded function
+// table; those don't change between EAGL and ANGLE.
+////////////////////////////////////////////////////////////
+
+
+////////////////////////////////////////////////////////////
 // Headers
 ////////////////////////////////////////////////////////////
 #include <SFML/Window/iOS/EaglContext.hpp>
@@ -30,52 +52,72 @@
 #include <SFML/Window/iOS/SFView.hpp>
 #include <SFML/System/Err.hpp>
 #include <SFML/System/Sleep.hpp>
-#include <OpenGLES/EAGL.h>
-#include <OpenGLES/EAGLDrawable.h>
-#include <QuartzCore/CAEAGLLayer.h>
-#include <dlfcn.h>
-
-#if defined(__APPLE__)
-    #if defined(__clang__)
-        #pragma clang diagnostic ignored "-Wdeprecated-declarations"
-    #elif defined(__GNUC__)
-        #pragma GCC diagnostic ignored "-Wdeprecated-declarations"
-    #endif
-#endif
-
+#include <EGL/egl.h>
+#include <UIKit/UIKit.h>
 
 namespace
 {
-    PFNGLBINDFRAMEBUFFEROESPROC            glBindFramebufferOESFunc            = 0;
-    PFNGLBINDRENDERBUFFEROESPROC           glBindRenderbufferOESFunc           = 0;
-    PFNGLCHECKFRAMEBUFFERSTATUSOESPROC     glCheckFramebufferStatusOESFunc     = 0;
-    PFNGLDELETEFRAMEBUFFERSOESPROC         glDeleteFramebuffersOESFunc         = 0;
-    PFNGLDELETERENDERBUFFERSOESPROC        glDeleteRenderbuffersOESFunc        = 0;
-    PFNGLFRAMEBUFFERRENDERBUFFEROESPROC    glFramebufferRenderbufferOESFunc    = 0;
-    PFNGLGENFRAMEBUFFERSOESPROC            glGenFramebuffersOESFunc            = 0;
-    PFNGLGENRENDERBUFFERSOESPROC           glGenRenderbuffersOESFunc           = 0;
-    PFNGLGETRENDERBUFFERPARAMETERIVOESPROC glGetRenderbufferParameterivOESFunc = 0;
-    PFNGLRENDERBUFFERSTORAGEOESPROC        glRenderbufferStorageOESFunc        = 0;
+    ////////////////////////////////////////////////////////////
+    /// One process-wide EGL display; ANGLE shares state across
+    /// every context that uses it. Lazily initialised on first
+    /// EaglContext construction so SFML's static
+    /// `internalContext` (created during sfml-window
+    /// initialisation) doesn't crash if ANGLE isn't ready yet.
+    ////////////////////////////////////////////////////////////
+    EGLDisplay g_display = EGL_NO_DISPLAY;
 
-
-    void ensureInit()
+    EGLDisplay ensureEglDisplay()
     {
-        static bool initialized = false;
-        if (!initialized)
-        {
-            initialized = true;
+        if (g_display != EGL_NO_DISPLAY)
+            return g_display;
 
-            glBindFramebufferOESFunc            = reinterpret_cast<PFNGLBINDFRAMEBUFFEROESPROC>           (sf::priv::EaglContext::getFunction("glBindFramebufferOES"));
-            glBindRenderbufferOESFunc           = reinterpret_cast<PFNGLBINDRENDERBUFFEROESPROC>          (sf::priv::EaglContext::getFunction("glBindRenderbufferOES"));
-            glCheckFramebufferStatusOESFunc     = reinterpret_cast<PFNGLCHECKFRAMEBUFFERSTATUSOESPROC>    (sf::priv::EaglContext::getFunction("glCheckFramebufferStatusOES"));
-            glDeleteFramebuffersOESFunc         = reinterpret_cast<PFNGLDELETEFRAMEBUFFERSOESPROC>        (sf::priv::EaglContext::getFunction("glDeleteFramebuffersOES"));
-            glDeleteRenderbuffersOESFunc        = reinterpret_cast<PFNGLDELETERENDERBUFFERSOESPROC>       (sf::priv::EaglContext::getFunction("glDeleteRenderbuffersOES"));
-            glFramebufferRenderbufferOESFunc    = reinterpret_cast<PFNGLFRAMEBUFFERRENDERBUFFEROESPROC>   (sf::priv::EaglContext::getFunction("glFramebufferRenderbufferOES"));
-            glGenFramebuffersOESFunc            = reinterpret_cast<PFNGLGENFRAMEBUFFERSOESPROC>           (sf::priv::EaglContext::getFunction("glGenFramebuffersOES"));
-            glGenRenderbuffersOESFunc           = reinterpret_cast<PFNGLGENRENDERBUFFERSOESPROC>          (sf::priv::EaglContext::getFunction("glGenRenderbuffersOES"));
-            glGetRenderbufferParameterivOESFunc = reinterpret_cast<PFNGLGETRENDERBUFFERPARAMETERIVOESPROC>(sf::priv::EaglContext::getFunction("glGetRenderbufferParameterivOES"));
-            glRenderbufferStorageOESFunc        = reinterpret_cast<PFNGLRENDERBUFFERSTORAGEOESPROC>       (sf::priv::EaglContext::getFunction("glRenderbufferStorageOES"));
+        EGLDisplay display = eglGetDisplay(EGL_DEFAULT_DISPLAY);
+        if (display == EGL_NO_DISPLAY)
+        {
+            sf::err() << "[EaglContext] eglGetDisplay returned EGL_NO_DISPLAY"
+                      << std::endl;
+            return EGL_NO_DISPLAY;
         }
+
+        EGLint major = 0, minor = 0;
+        if (!eglInitialize(display, &major, &minor))
+        {
+            sf::err() << "[EaglContext] eglInitialize failed (0x"
+                      << std::hex << eglGetError() << ")" << std::endl;
+            return EGL_NO_DISPLAY;
+        }
+
+        g_display = display;
+        return g_display;
+    }
+
+    ////////////////////////////////////////////////////////////
+    /// Choose an EGL config matching the requested SFML settings.
+    /// SFML's ContextSettings carries depth/stencil/AA bits; we
+    /// honour them where ANGLE has the matching attributes.
+    ////////////////////////////////////////////////////////////
+    EGLConfig chooseConfig(EGLDisplay display, const sf::ContextSettings& settings)
+    {
+        EGLint attribs[] = {
+            EGL_RENDERABLE_TYPE, EGL_OPENGL_ES2_BIT,
+            EGL_SURFACE_TYPE,    EGL_WINDOW_BIT | EGL_PBUFFER_BIT,
+            EGL_RED_SIZE,        8,
+            EGL_GREEN_SIZE,      8,
+            EGL_BLUE_SIZE,       8,
+            EGL_ALPHA_SIZE,      8,
+            EGL_DEPTH_SIZE,      static_cast<EGLint>(settings.depthBits),
+            EGL_STENCIL_SIZE,    static_cast<EGLint>(settings.stencilBits),
+            EGL_NONE
+        };
+
+        EGLConfig  config    = nullptr;
+        EGLint     numConfig = 0;
+        if (!eglChooseConfig(display, attribs, &config, 1, &numConfig) || numConfig == 0)
+        {
+            sf::err() << "[EaglContext] eglChooseConfig failed (0x"
+                      << std::hex << eglGetError() << ")" << std::endl;
+        }
+        return config;
     }
 }
 
@@ -86,83 +128,159 @@ namespace priv
 {
 ////////////////////////////////////////////////////////////
 EaglContext::EaglContext(EaglContext* shared) :
-m_context     (nil),
-m_framebuffer (0),
-m_colorbuffer (0),
-m_depthbuffer (0),
+m_display     (EGL_NO_DISPLAY),
+m_context     (EGL_NO_CONTEXT),
+m_surface     (EGL_NO_SURFACE),
+m_config      (nullptr),
 m_vsyncEnabled(false),
 m_clock       ()
 {
-    ensureInit();
+    EGLDisplay display = ensureEglDisplay();
+    if (display == EGL_NO_DISPLAY)
+        return;
+    m_display = display;
 
-    // Create the context
-    if (shared)
-        m_context = [[EAGLContext alloc] initWithAPI:kEAGLRenderingAPIOpenGLES1 sharegroup:[shared->m_context sharegroup]];
-    else
-        m_context = [[EAGLContext alloc] initWithAPI:kEAGLRenderingAPIOpenGLES1];
+    ContextSettings defaults;
+    EGLConfig config = chooseConfig(display, defaults);
+    m_config = config;
+
+    EGLint contextAttribs[] = {
+        EGL_CONTEXT_CLIENT_VERSION, 2,
+        EGL_NONE
+    };
+    EGLContext sharedCtx = shared ? static_cast<EGLContext>(shared->m_context) : EGL_NO_CONTEXT;
+    EGLContext context = eglCreateContext(display, config, sharedCtx, contextAttribs);
+    if (context == EGL_NO_CONTEXT)
+    {
+        err() << "[EaglContext] eglCreateContext (shared) failed (0x"
+              << std::hex << eglGetError() << ")" << std::endl;
+        return;
+    }
+    m_context = context;
+
+    // 1x1 pbuffer so contexts without a window have something to bind.
+    EGLint pbufferAttribs[] = {
+        EGL_WIDTH,  1,
+        EGL_HEIGHT, 1,
+        EGL_NONE
+    };
+    m_surface = eglCreatePbufferSurface(display, config, pbufferAttribs);
 }
 
 
 ////////////////////////////////////////////////////////////
 EaglContext::EaglContext(EaglContext* shared, const ContextSettings& settings,
-                         const WindowImpl* owner, unsigned int bitsPerPixel) :
-m_context     (nil),
-m_framebuffer (0),
-m_colorbuffer (0),
-m_depthbuffer (0),
+                         const WindowImpl* owner, unsigned int /* bitsPerPixel */) :
+m_display     (EGL_NO_DISPLAY),
+m_context     (EGL_NO_CONTEXT),
+m_surface     (EGL_NO_SURFACE),
+m_config      (nullptr),
 m_vsyncEnabled(false),
 m_clock       ()
 {
-    ensureInit();
+    m_settings = settings;
 
+    EGLDisplay display = ensureEglDisplay();
+    if (display == EGL_NO_DISPLAY)
+        return;
+    m_display = display;
+
+    EGLConfig config = chooseConfig(display, m_settings);
+    m_config = config;
+
+    EGLint contextAttribs[] = {
+        EGL_CONTEXT_CLIENT_VERSION, 2,
+        EGL_NONE
+    };
+    EGLContext sharedCtx = shared ? static_cast<EGLContext>(shared->m_context) : EGL_NO_CONTEXT;
+    EGLContext context = eglCreateContext(display, config, sharedCtx, contextAttribs);
+    if (context == EGL_NO_CONTEXT)
+    {
+        err() << "[EaglContext] eglCreateContext (window) failed (0x"
+              << std::hex << eglGetError() << ")" << std::endl;
+        return;
+    }
+    m_context = context;
+
+    // Window-attached: bind the surface to the SFView's CAMetalLayer.
     const WindowImplUIKit* window = static_cast<const WindowImplUIKit*>(owner);
-
-    createContext(shared, window, bitsPerPixel, settings);
+    SFView* view = window->getGlView();
+    if (view)
+    {
+        EGLNativeWindowType nativeWindow = (__bridge EGLNativeWindowType)view.layer;
+        EGLSurface surface = eglCreateWindowSurface(display, config, nativeWindow, nullptr);
+        if (surface == EGL_NO_SURFACE)
+        {
+            err() << "[EaglContext] eglCreateWindowSurface failed (0x"
+                  << std::hex << eglGetError() << ")" << std::endl;
+        }
+        m_surface = surface;
+        view.context = this;
+    }
 }
 
 
 ////////////////////////////////////////////////////////////
-EaglContext::EaglContext(EaglContext* /* shared */, const ContextSettings& /* settings */,
-                         unsigned int /* width */, unsigned int /* height */) :
-m_context     (nil),
-m_framebuffer (0),
-m_colorbuffer (0),
-m_depthbuffer (0),
+EaglContext::EaglContext(EaglContext* shared, const ContextSettings& settings,
+                         unsigned int width, unsigned int height) :
+m_display     (EGL_NO_DISPLAY),
+m_context     (EGL_NO_CONTEXT),
+m_surface     (EGL_NO_SURFACE),
+m_config      (nullptr),
 m_vsyncEnabled(false),
 m_clock       ()
 {
-    ensureInit();
+    m_settings = settings;
 
-    // This constructor should never be used by implementation
-    err() << "Calling bad EaglContext constructor, please contact your developer :)" << std::endl;
+    EGLDisplay display = ensureEglDisplay();
+    if (display == EGL_NO_DISPLAY)
+        return;
+    m_display = display;
+
+    EGLConfig config = chooseConfig(display, m_settings);
+    m_config = config;
+
+    EGLint contextAttribs[] = {
+        EGL_CONTEXT_CLIENT_VERSION, 2,
+        EGL_NONE
+    };
+    EGLContext sharedCtx = shared ? static_cast<EGLContext>(shared->m_context) : EGL_NO_CONTEXT;
+    EGLContext context = eglCreateContext(display, config, sharedCtx, contextAttribs);
+    if (context == EGL_NO_CONTEXT)
+    {
+        err() << "[EaglContext] eglCreateContext (pbuffer) failed (0x"
+              << std::hex << eglGetError() << ")" << std::endl;
+        return;
+    }
+    m_context = context;
+
+    EGLint pbufferAttribs[] = {
+        EGL_WIDTH,  static_cast<EGLint>(width),
+        EGL_HEIGHT, static_cast<EGLint>(height),
+        EGL_NONE
+    };
+    m_surface = eglCreatePbufferSurface(display, config, pbufferAttribs);
 }
 
 
 ////////////////////////////////////////////////////////////
 EaglContext::~EaglContext()
 {
-    // Notify unshared OpenGL resources of context destruction
     cleanupUnsharedResources();
 
-    if (m_context)
+    EGLDisplay display = static_cast<EGLDisplay>(m_display);
+    EGLContext context = static_cast<EGLContext>(m_context);
+    EGLSurface surface = static_cast<EGLSurface>(m_surface);
+
+    if (display != EGL_NO_DISPLAY)
     {
-        // Activate the context, so that we can destroy the buffers
-        EAGLContext* previousContext = [EAGLContext currentContext];
-        [EAGLContext setCurrentContext:m_context];
+        if (eglGetCurrentContext() == context)
+            eglMakeCurrent(display, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
 
-        // Destroy the buffers
-        if (m_framebuffer)
-            glDeleteFramebuffersOESFunc(1, &m_framebuffer);
-        if (m_colorbuffer)
-            glDeleteRenderbuffersOESFunc(1, &m_colorbuffer);
-        if (m_depthbuffer)
-            glDeleteRenderbuffersOESFunc(1, &m_depthbuffer);
-
-        // Restore the previous context
-        [EAGLContext setCurrentContext:previousContext];
-
-        if (m_context == [EAGLContext currentContext])
-            [EAGLContext setCurrentContext:nil];
+        if (surface != EGL_NO_SURFACE)
+            eglDestroySurface(display, surface);
+        if (context != EGL_NO_CONTEXT)
+            eglDestroyContext(display, context);
     }
 }
 
@@ -170,104 +288,74 @@ EaglContext::~EaglContext()
 ////////////////////////////////////////////////////////////
 GlFunctionPointer EaglContext::getFunction(const char* name)
 {
-    static void* module = 0;
-
-    const int libCount = 3;
-    const char* libs[libCount] =
-    {
-        "libGLESv1_CM.dylib",
-        "/System/Library/Frameworks/OpenGLES.framework/OpenGLES",
-        "OpenGLES.framework/OpenGLES"
-    };
-
-    for (int i = 0; i < libCount; ++i)
-    {
-        if (!module)
-            module = dlopen(libs[i], RTLD_LAZY | RTLD_LOCAL);
-    }
-
-    if (module)
-        return reinterpret_cast<GlFunctionPointer>(
-            reinterpret_cast<uintptr_t>(dlsym(module, name)));
-
-    return 0;
+    return reinterpret_cast<GlFunctionPointer>(eglGetProcAddress(name));
 }
 
 
 ////////////////////////////////////////////////////////////
 void EaglContext::recreateRenderBuffers(SFView* glView)
 {
-    // Activate the context
-    EAGLContext* previousContext = [EAGLContext currentContext];
-    [EAGLContext setCurrentContext:m_context];
+    EGLDisplay display = static_cast<EGLDisplay>(m_display);
+    EGLConfig  config  = static_cast<EGLConfig>(m_config);
+    EGLContext context = static_cast<EGLContext>(m_context);
 
-    // Bind the frame buffer
-    glBindFramebufferOESFunc(GL_FRAMEBUFFER_OES, m_framebuffer);
+    if (display == EGL_NO_DISPLAY || !glView)
+        return;
 
-    // Destroy previous render-buffers
-    if (m_colorbuffer)
-        glDeleteRenderbuffersOESFunc(1, &m_colorbuffer);
-    if (m_depthbuffer)
-        glDeleteRenderbuffersOESFunc(1, &m_depthbuffer);
-
-    // Create the color buffer
-    glGenRenderbuffersOESFunc(1, &m_colorbuffer);
-    glBindRenderbufferOESFunc(GL_RENDERBUFFER_OES, m_colorbuffer);
-    if (glView)
-        [m_context renderbufferStorage:GL_RENDERBUFFER_OES fromDrawable:(static_cast<CAEAGLLayer*>(glView.layer))];
-    glFramebufferRenderbufferOESFunc(GL_FRAMEBUFFER_OES, GL_COLOR_ATTACHMENT0_OES, GL_RENDERBUFFER_OES, m_colorbuffer);
-
-    // Create a depth buffer if requested
-    if (m_settings.depthBits > 0)
+    EGLSurface oldSurface = static_cast<EGLSurface>(m_surface);
+    if (oldSurface != EGL_NO_SURFACE)
     {
-        // Find the best internal format
-        GLenum format = m_settings.depthBits > 16
-            ? (m_settings.stencilBits == 0 ? GL_DEPTH_COMPONENT24_OES : GL_DEPTH24_STENCIL8_OES)
-            : GL_DEPTH_COMPONENT16_OES;
-
-        // Get the size of the color-buffer (which fits the current size of the GL view)
-        GLint width, height;
-        glGetRenderbufferParameterivOESFunc(GL_RENDERBUFFER_OES, GL_RENDERBUFFER_WIDTH_OES, &width);
-        glGetRenderbufferParameterivOESFunc(GL_RENDERBUFFER_OES, GL_RENDERBUFFER_HEIGHT_OES, &height);
-
-        // Create the depth buffer
-        glGenRenderbuffersOESFunc(1, &m_depthbuffer);
-        glBindRenderbufferOESFunc(GL_RENDERBUFFER_OES, m_depthbuffer);
-        glRenderbufferStorageOESFunc(GL_RENDERBUFFER_OES, format, width, height);
-        glFramebufferRenderbufferOESFunc(GL_FRAMEBUFFER_OES, GL_DEPTH_ATTACHMENT_OES, GL_RENDERBUFFER_OES, m_depthbuffer);
-        if (m_settings.stencilBits > 0)
-            glFramebufferRenderbufferOESFunc(GL_FRAMEBUFFER_OES, GL_STENCIL_ATTACHMENT_OES, GL_RENDERBUFFER_OES, m_depthbuffer);
+        eglMakeCurrent(display, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
+        eglDestroySurface(display, oldSurface);
+        m_surface = EGL_NO_SURFACE;
     }
 
-    // Make sure that everything's ok
-    GLenum status = glCheckFramebufferStatusOESFunc(GL_FRAMEBUFFER_OES);
-    if (status != GL_FRAMEBUFFER_COMPLETE_OES)
-        err() << "Failed to create a valid frame buffer (error code: " << status << ")" << std::endl;
+    EGLNativeWindowType nativeWindow = (__bridge EGLNativeWindowType)glView.layer;
+    EGLSurface surface = eglCreateWindowSurface(display, config, nativeWindow, nullptr);
+    if (surface == EGL_NO_SURFACE)
+    {
+        err() << "[EaglContext] eglCreateWindowSurface (recreate) failed (0x"
+              << std::hex << eglGetError() << ")" << std::endl;
+        return;
+    }
+    m_surface = surface;
 
-    // Restore the previous context
-    [EAGLContext setCurrentContext:previousContext];
+    eglMakeCurrent(display, surface, surface, context);
 }
 
 
 ////////////////////////////////////////////////////////////
 bool EaglContext::makeCurrent(bool current)
 {
-    if (current)
-        return [EAGLContext setCurrentContext:m_context];
+    EGLDisplay display = static_cast<EGLDisplay>(m_display);
+    if (display == EGL_NO_DISPLAY)
+        return false;
 
-    return [EAGLContext setCurrentContext:nil];
+    if (current)
+    {
+        EGLSurface surface = static_cast<EGLSurface>(m_surface);
+        EGLContext context = static_cast<EGLContext>(m_context);
+        return eglMakeCurrent(display, surface, surface, context) == EGL_TRUE;
+    }
+
+    return eglMakeCurrent(display, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT) == EGL_TRUE;
 }
 
 
 ////////////////////////////////////////////////////////////
 void EaglContext::display()
 {
-    glBindRenderbufferOESFunc(GL_RENDERBUFFER_OES, m_colorbuffer);
-    [m_context presentRenderbuffer:GL_RENDERBUFFER_OES];
+    EGLDisplay display = static_cast<EGLDisplay>(m_display);
+    EGLSurface surface = static_cast<EGLSurface>(m_surface);
+    if (display == EGL_NO_DISPLAY || surface == EGL_NO_SURFACE)
+        return;
 
-    // The proper way of doing v-sync on iOS would be to use CADisplayLink
-    // notifications, but it is not compatible with the way SFML is designed;
-    // therefore we fake it with a manual framerate limit
+    eglSwapBuffers(display, surface);
+
+    // CADisplayLink would be the proper iOS v-sync, but mirroring
+    // the original EAGL implementation we fake it with a frame-rate
+    // limit. ANGLE-on-Metal has its own pacing too, so the
+    // sleep+clock dance below is mostly a safety net.
     if (m_vsyncEnabled)
     {
         static const Time frameDuration = seconds(1.f / 60.f);
@@ -281,53 +369,23 @@ void EaglContext::display()
 void EaglContext::setVerticalSyncEnabled(bool enabled)
 {
     m_vsyncEnabled = enabled;
+    EGLDisplay display = static_cast<EGLDisplay>(m_display);
+    if (display != EGL_NO_DISPLAY)
+        eglSwapInterval(display, enabled ? 1 : 0);
 }
 
 
 ////////////////////////////////////////////////////////////
-void EaglContext::createContext(EaglContext* shared,
-                                const WindowImplUIKit* window,
+void EaglContext::createContext(EaglContext* /* shared */,
+                                const WindowImplUIKit* /* window */,
                                 unsigned int /* bitsPerPixel */,
-                                const ContextSettings& settings)
+                                const ContextSettings& /* settings */)
 {
-    // Save the settings
-    m_settings = settings;
-
-    // Adjust the depth buffer format to those available
-    if (m_settings.depthBits > 16)
-        m_settings.depthBits = 24;
-    else if (m_settings.depthBits > 0)
-        m_settings.depthBits = 16;
-
-    // Create the context
-    if (shared)
-    {
-        [EAGLContext setCurrentContext:nil];
-
-        m_context = [[EAGLContext alloc] initWithAPI:kEAGLRenderingAPIOpenGLES1 sharegroup:[shared->m_context sharegroup]];
-    }
-    else
-    {
-        m_context = [[EAGLContext alloc] initWithAPI:kEAGLRenderingAPIOpenGLES1];
-    }
-
-    // Activate it
-    makeCurrent(true);
-
-    // Create the framebuffer (this is the only allowed drawable on iOS)
-    glGenFramebuffersOESFunc(1, &m_framebuffer);
-
-    // Create the render buffers
-    recreateRenderBuffers(window->getGlView());
-
-    // Attach the context to the GL view for future updates
-    window->getGlView().context = this;
-
-    // Deactivate it
-    makeCurrent(false);
+    // Folded into the constructors above; left in place so
+    // EaglContext.hpp's private declaration stays valid even if a
+    // future SFML re-merge re-introduces a delegating call site.
 }
 
 } // namespace priv
 
 } // namespace sf
-

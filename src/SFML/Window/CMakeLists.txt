@@ -316,7 +316,21 @@ if ((NOT ${CMAKE_VERSION} VERSION_LESS 3.11) AND (NOT OpenGL_GL_PREFERENCE))
 endif()
 
 if(SFML_OS_IOS)
-    target_link_libraries(sfml-window PRIVATE "-framework OpenGLES")
+    # ANGLE replaces the deprecated -framework OpenGLES path.
+    # Empo provides the static libs under ios/Dependencies/ANGLE/
+    # and surfaces them via SFML_IOS_ANGLE_DIR (set from the
+    # outer common.make rule).
+    if(NOT DEFINED SFML_IOS_ANGLE_DIR)
+        message(FATAL_ERROR "SFML iOS build requires SFML_IOS_ANGLE_DIR pointing at an ANGLE distribution (iphonesimulator/ or iphoneos/).")
+    endif()
+
+    target_include_directories(sfml-window PRIVATE "${SFML_IOS_ANGLE_DIR}/include")
+    target_link_libraries(sfml-window PRIVATE
+        "${SFML_IOS_ANGLE_DIR}/lib/libEGL_static.a"
+        "${SFML_IOS_ANGLE_DIR}/lib/libGLESv2_static.a"
+        "${SFML_IOS_ANGLE_DIR}/lib/libANGLE_static.a"
+        "-framework Metal"
+        "-framework QuartzCore")
 elseif(SFML_OS_ANDROID)
     sfml_find_package(GLES INCLUDE "GLES_INCLUDE_DIR" LINK "GLES_LIBRARY")
     sfml_find_package(EGL INCLUDE "EGL_INCLUDE_DIR" LINK "EGL_LIBRARY")

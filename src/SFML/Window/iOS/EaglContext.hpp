@@ -32,10 +32,8 @@
 #include <SFML/Window/iOS/ObjCType.hpp>
 #include <SFML/System/Vector2.hpp>
 #include <SFML/System/Clock.hpp>
-#include <glad/gl.h>
 
 
-SFML_DECLARE_OBJC_CLASS(EAGLContext);
 SFML_DECLARE_OBJC_CLASS(SFView);
 
 namespace sf
@@ -45,7 +43,15 @@ namespace priv
 class WindowImplUIKit;
 
 ////////////////////////////////////////////////////////////
-/// \brief iOS (EAGL) implementation of OpenGL contexts
+/// \brief iOS implementation of OpenGL contexts via ANGLE/EGL
+///
+/// Class kept named EaglContext for source compatibility with
+/// SFML's GlContext factory in GlContext.cpp; the implementation
+/// has been swapped from Apple's deprecated EAGL framework over
+/// to ANGLE's EGL (which translates GLES2 calls to Metal under
+/// the hood). The same SFML render code paths now work without
+/// EAGL/CAEAGLLayer / OpenGLES.framework, which Apple has been
+/// signalling will be removed.
 ///
 ////////////////////////////////////////////////////////////
 class EaglContext : public GlContext
@@ -162,11 +168,15 @@ private:
     ////////////////////////////////////////////////////////////
     // Member data
     ////////////////////////////////////////////////////////////
-    EAGLContext* m_context; ///< The internal context
-    GLuint m_framebuffer;   ///< Frame buffer associated to the context
-    GLuint m_colorbuffer;   ///< Color render buffer
-    GLuint m_depthbuffer;   ///< Depth render buffer
-    bool m_vsyncEnabled;    ///< Vertical sync activation flag
+    // Opaque void*s here so this header doesn't pull in EGL/egl.h
+    // (whose typedef set conflicts with SFML's bundled glad/egl.h
+    // when both end up in the same translation unit). The .mm file
+    // casts these to EGLDisplay/EGLContext/EGLSurface/EGLConfig.
+    void* m_display;        ///< EGLDisplay (process-shared, from ANGLE)
+    void* m_context;        ///< EGLContext owned by this object
+    void* m_surface;        ///< EGLSurface (window or pbuffer)
+    void* m_config;         ///< EGLConfig the context was created with
+    bool  m_vsyncEnabled;   ///< Vertical sync activation flag
     Clock m_clock;          ///< Measures the elapsed time for the fake v-sync implementation
 };
 
