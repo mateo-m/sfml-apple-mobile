@@ -60,6 +60,42 @@ void ensureExtensionsInit()
 
 #ifdef SFML_OPENGL_ES
         gladLoadGLES1(reinterpret_cast<GLADloadfunc>(sf::Context::getFunction));
+
+        // mkxp-ios: gladLoadGLES1 populates ES 1.1 entry points only.
+        // ANGLE's libGLESv2 exports the core ES2+ framebuffer functions
+        // (glGenFramebuffers, glBindFramebuffer, glReadPixels via FBO,
+        // ...) but NOT their OES_framebuffer_object aliases that
+        // SFML's GLEXT_* macros expand to on iOS. Manually alias the
+        // OES function pointers to the core ones via the same
+        // sf::Context::getFunction loader so SFML's
+        // `Texture::copyToImage`, `RenderTextureImplFBO::createFrameBuffer`,
+        // and friends find a real entry point at runtime instead of
+        // dereferencing the NULL slot left behind by the ES1 loader.
+        auto load = [](const char* name) {
+            return reinterpret_cast<void*>(sf::Context::getFunction(name));
+        };
+        if (auto p = load("glGenFramebuffers"))
+            sf_glad_glGenFramebuffersOES = reinterpret_cast<PFNGLGENFRAMEBUFFERSOESPROC>(p);
+        if (auto p = load("glBindFramebuffer"))
+            sf_glad_glBindFramebufferOES = reinterpret_cast<PFNGLBINDFRAMEBUFFEROESPROC>(p);
+        if (auto p = load("glDeleteFramebuffers"))
+            sf_glad_glDeleteFramebuffersOES = reinterpret_cast<PFNGLDELETEFRAMEBUFFERSOESPROC>(p);
+        if (auto p = load("glCheckFramebufferStatus"))
+            sf_glad_glCheckFramebufferStatusOES = reinterpret_cast<PFNGLCHECKFRAMEBUFFERSTATUSOESPROC>(p);
+        if (auto p = load("glFramebufferTexture2D"))
+            sf_glad_glFramebufferTexture2DOES = reinterpret_cast<PFNGLFRAMEBUFFERTEXTURE2DOESPROC>(p);
+        if (auto p = load("glFramebufferRenderbuffer"))
+            sf_glad_glFramebufferRenderbufferOES = reinterpret_cast<PFNGLFRAMEBUFFERRENDERBUFFEROESPROC>(p);
+        if (auto p = load("glGenRenderbuffers"))
+            sf_glad_glGenRenderbuffersOES = reinterpret_cast<PFNGLGENRENDERBUFFERSOESPROC>(p);
+        if (auto p = load("glBindRenderbuffer"))
+            sf_glad_glBindRenderbufferOES = reinterpret_cast<PFNGLBINDRENDERBUFFEROESPROC>(p);
+        if (auto p = load("glDeleteRenderbuffers"))
+            sf_glad_glDeleteRenderbuffersOES = reinterpret_cast<PFNGLDELETERENDERBUFFERSOESPROC>(p);
+        if (auto p = load("glRenderbufferStorage"))
+            sf_glad_glRenderbufferStorageOES = reinterpret_cast<PFNGLRENDERBUFFERSTORAGEOESPROC>(p);
+        if (auto p = load("glGenerateMipmap"))
+            sf_glad_glGenerateMipmapOES = reinterpret_cast<PFNGLGENERATEMIPMAPOESPROC>(p);
 #else
         gladLoadGL(reinterpret_cast<GLADloadfunc>(sf::Context::getFunction));
 #endif
