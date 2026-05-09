@@ -570,10 +570,23 @@ void Font::cleanup()
 ////////////////////////////////////////////////////////////
 Font::Page& Font::loadPage(unsigned int characterSize) const
 {
-    // TODO: Remove this method and use try_emplace instead when updating to C++17
+    // mkxp-ios: replaced the original `find/insert(make_pair(...))` pair
+    // with piecewise_construct emplace so the new Page is constructed
+    // IN-PLACE in the map instead of going through Page's copy
+    // constructor. The copy constructor invokes Texture's copy
+    // constructor, which calls `copyToImage()` -> the FBO+`glReadPixels`
+    // readback path. On the iOS port built against ANGLE's libGLESv2 the
+    // readback path dereferences null and crashes with
+    // `KERN_INVALID_ADDRESS at 0x0` mid-`Font::loadPage`. piecewise
+    // emplace avoids the copy entirely; the texture allocated inside the
+    // Page constructor lives directly in the map storage from creation
+    // onwards. C++17's `try_emplace` would be cleaner but SFML is
+    // compiled with C++11.
     PageTable::iterator pageIterator = m_pages.find(characterSize);
     if (pageIterator == m_pages.end())
-        pageIterator = m_pages.insert(std::make_pair(characterSize, Page(m_isSmooth))).first;
+        pageIterator = m_pages.emplace(std::piecewise_construct,
+                                       std::forward_as_tuple(characterSize),
+                                       std::forward_as_tuple(m_isSmooth)).first;
 
     return pageIterator->second;
 }
@@ -859,7 +872,18 @@ nextRow(3)
 {
     // Make sure that the texture is initialized by default
     sf::Image image;
-    image.create(128, 128, Color(255, 255, 255, 0));
+    // mkxp-ios: SFML's default 128x128 starting page triggers
+    // a Texture::update(const Texture&) growth path the first time
+    // the user renders enough glyphs to overflow it. On the iOS port
+    // built against ANGLE's libGLESv2, that growth path's CPU readback
+    // (`copyToImage` -> `glReadPixels` against an FBO-attached texture)
+    // dereferences null and crashes during PSDK's title-screen text
+    // setup. Until SFML iOS gains a GLES3 `glBlitFramebuffer` path
+    // (issue tracked as Phase 4.4h), bump the initial page to 1024x1024
+    // so the growth path is never reached for typical games. 4 MB per
+    // page x ~5-10 fonts loaded by PSDK = an extra ~20-40 MB resident,
+    // acceptable on iPhone 11 and above (our floor).
+    image.create(1024, 1024, Color(255, 255, 255, 0));
 
     // Reserve a 2x2 white square for texturing underlines
     for (unsigned int x = 0; x < 2; ++x)
