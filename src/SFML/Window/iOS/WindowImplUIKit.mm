@@ -58,44 +58,63 @@ WindowImplUIKit::WindowImplUIKit(VideoMode mode,
                                  unsigned long style,
                                  const ContextSettings& /* settings */)
 {
-    m_backingScale = static_cast<float>([SFAppDelegate getInstance].backingScaleFactor);
+    // mkxp-ios: every UIKit / UIWindow / UIView operation has to
+    // happen on the main thread or UIApplication throws
+    // NSInternalInconsistencyException ("Call must be made on main
+    // thread"). LiteRGSS / mkxp drive the engine from a worker
+    // thread (the SDL worker for litergss_run, the RGSS thread for
+    // mkxp), so the construction below has to be marshaled. Use
+    // dispatch_sync so the worker blocks until the window is up
+    // and `m_window` / `m_view` etc. are valid before this
+    // constructor returns. Skip the dispatch when already on main
+    // (e.g. tests, or if some embedder calls in from main) to
+    // avoid the deadlock dispatch_sync_to_self_queue would cause.
+    auto setup = [&]() {
+        m_backingScale = static_cast<float>([SFAppDelegate getInstance].backingScaleFactor);
 
-    // Apply the fullscreen flag
-    [UIApplication sharedApplication].statusBarHidden = !(style & Style::Titlebar) || (style & Style::Fullscreen);
+        // Apply the fullscreen flag
+        [UIApplication sharedApplication].statusBarHidden = !(style & Style::Titlebar) || (style & Style::Fullscreen);
 
-    // Set the orientation according to the requested size
-    if (mode.width > mode.height)
-        [[UIApplication sharedApplication] setStatusBarOrientation:UIInterfaceOrientationLandscapeLeft];
-    else
-        [[UIApplication sharedApplication] setStatusBarOrientation:UIInterfaceOrientationPortrait];
+        // Set the orientation according to the requested size
+        if (mode.width > mode.height)
+            [[UIApplication sharedApplication] setStatusBarOrientation:UIInterfaceOrientationLandscapeLeft];
+        else
+            [[UIApplication sharedApplication] setStatusBarOrientation:UIInterfaceOrientationPortrait];
 
-    // Create the window
-    CGRect frame = [UIScreen mainScreen].bounds; // Ignore user size, it wouldn't make sense to use something else
-    m_window = [[UIWindow alloc] initWithFrame:frame];
-    m_hasFocus = true;
+        // Create the window
+        CGRect frame = [UIScreen mainScreen].bounds; // Ignore user size, it wouldn't make sense to use something else
+        m_window = [[UIWindow alloc] initWithFrame:frame];
+        m_hasFocus = true;
 
-    // Assign it to the application delegate
-    [SFAppDelegate getInstance].sfWindow = this;
+        // Assign it to the application delegate
+        [SFAppDelegate getInstance].sfWindow = this;
 
-    CGRect viewRect = frame;
-    // if UI-orientation doesn't match window-layout, swap the view size and notify the window about it
-    // iOS 7 and 8 do different stuff here. In iOS 7 frame.x<frame.y always! In iOS 8 it correctly depends on orientation
-    if (NSFoundationVersionNumber <= NSFoundationVersionNumber_iOS_7_1)
-        if ((mode.width > mode.height) != (frame.size.width > frame.size.height))
-            std::swap(viewRect.size.width, viewRect.size.height);
+        CGRect viewRect = frame;
+        // if UI-orientation doesn't match window-layout, swap the view size and notify the window about it
+        // iOS 7 and 8 do different stuff here. In iOS 7 frame.x<frame.y always! In iOS 8 it correctly depends on orientation
+        if (NSFoundationVersionNumber <= NSFoundationVersionNumber_iOS_7_1)
+            if ((mode.width > mode.height) != (frame.size.width > frame.size.height))
+                std::swap(viewRect.size.width, viewRect.size.height);
 
-    // Create the view
-    m_view = [[SFView alloc] initWithFrame:viewRect andContentScaleFactor:(static_cast<double>(m_backingScale))];
-    [m_view resignFirstResponder];
+        // Create the view
+        m_view = [[SFView alloc] initWithFrame:viewRect andContentScaleFactor:(static_cast<double>(m_backingScale))];
+        [m_view resignFirstResponder];
 
-    // Create the view controller
-    m_viewController = [SFViewController alloc];
-    m_viewController.view = m_view;
-    m_viewController.orientationCanChange = style & Style::Resize;
-    m_window.rootViewController = m_viewController;
+        // Create the view controller
+        m_viewController = [SFViewController alloc];
+        m_viewController.view = m_view;
+        m_viewController.orientationCanChange = style & Style::Resize;
+        m_window.rootViewController = m_viewController;
 
-    // Make it the current window
-    [m_window makeKeyAndVisible];
+        // Make it the current window
+        [m_window makeKeyAndVisible];
+    };
+
+    if ([NSThread isMainThread]) {
+        setup();
+    } else {
+        dispatch_sync(dispatch_get_main_queue(), ^{ setup(); });
+    }
 }
 
 
@@ -173,11 +192,19 @@ void WindowImplUIKit::setSize(const Vector2u& size)
     // size.x /= m_backingScale;
     // size.y /= m_backingScale;
 
-    // Set the orientation according to the requested size
-    if (size.x > size.y)
-        [[UIApplication sharedApplication] setStatusBarOrientation:UIInterfaceOrientationLandscapeLeft];
-    else
-        [[UIApplication sharedApplication] setStatusBarOrientation:UIInterfaceOrientationPortrait];
+    // Set the orientation according to the requested size; UIKit
+    // setStatusBarOrientation requires main thread.
+    auto apply = [size]() {
+        if (size.x > size.y)
+            [[UIApplication sharedApplication] setStatusBarOrientation:UIInterfaceOrientationLandscapeLeft];
+        else
+            [[UIApplication sharedApplication] setStatusBarOrientation:UIInterfaceOrientationPortrait];
+    };
+    if ([NSThread isMainThread]) {
+        apply();
+    } else {
+        dispatch_sync(dispatch_get_main_queue(), ^{ apply(); });
+    }
 }
 
 
@@ -266,10 +293,19 @@ SFView* WindowImplUIKit::getGlView() const
 ////////////////////////////////////////////////////////////
 void WindowImplUIKit::setVirtualKeyboardVisible(bool visible)
 {
-    if (visible)
-        [m_view becomeFirstResponder];
-    else
-        [m_view resignFirstResponder];
+    // becomeFirstResponder / resignFirstResponder are UIKit calls,
+    // main-thread only.
+    auto toggle = [this, visible]() {
+        if (visible)
+            [m_view becomeFirstResponder];
+        else
+            [m_view resignFirstResponder];
+    };
+    if ([NSThread isMainThread]) {
+        toggle();
+    } else {
+        dispatch_sync(dispatch_get_main_queue(), ^{ toggle(); });
+    }
 }
 
 } // namespace priv
