@@ -297,7 +297,7 @@ void EaglContext::recreateRenderBuffers(SFView* glView)
 {
     EGLDisplay display = static_cast<EGLDisplay>(m_display);
     EGLConfig  config  = static_cast<EGLConfig>(m_config);
-    EGLContext context = static_cast<EGLContext>(m_context);
+    (void)static_cast<EGLContext>(m_context); // intentionally unused; see note below
 
     if (display == EGL_NO_DISPLAY || !glView)
         return;
@@ -305,6 +305,10 @@ void EaglContext::recreateRenderBuffers(SFView* glView)
     EGLSurface oldSurface = static_cast<EGLSurface>(m_surface);
     if (oldSurface != EGL_NO_SURFACE)
     {
+        // Release any binding on THIS thread so the destroy below is
+        // legal. If another thread holds the context, that thread's
+        // surface binding becomes stale; SFML's render loop will
+        // re-bind via setActive(true) on its own thread.
         eglMakeCurrent(display, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
         eglDestroySurface(display, oldSurface);
         m_surface = EGL_NO_SURFACE;
@@ -320,7 +324,15 @@ void EaglContext::recreateRenderBuffers(SFView* glView)
     }
     m_surface = surface;
 
-    eglMakeCurrent(display, surface, surface, context);
+    // mkxp-ios: do NOT eglMakeCurrent here. layoutSubviews fires on
+    // the main thread, but PSDK / mkxp drive the render loop from a
+    // worker thread that needs to claim this EGL context exclusively
+    // via Window::setActive(true). Binding the context to main here
+    // causes every subsequent worker-thread eglMakeCurrent call to
+    // fail with EGL_BAD_ACCESS (0x3002), which manifests as a
+    // tight-loop "Failed to activate the window's context" stream
+    // and a black render. The new surface is fully constructed; the
+    // worker's setActive will pick it up.
 }
 
 
@@ -329,13 +341,40 @@ bool EaglContext::makeCurrent(bool current)
 {
     EGLDisplay display = static_cast<EGLDisplay>(m_display);
     if (display == EGL_NO_DISPLAY)
+    {
+        static bool warnedNoDisplay = false;
+        if (!warnedNoDisplay)
+        {
+            warnedNoDisplay = true;
+            err() << "[EaglContext] makeCurrent: m_display is EGL_NO_DISPLAY"
+                  << std::endl;
+        }
         return false;
+    }
 
     if (current)
     {
         EGLSurface surface = static_cast<EGLSurface>(m_surface);
         EGLContext context = static_cast<EGLContext>(m_context);
-        return eglMakeCurrent(display, surface, surface, context) == EGL_TRUE;
+        if (eglMakeCurrent(display, surface, surface, context) == EGL_TRUE)
+            return true;
+
+        // mkxp-ios: log the actual EGL error code on first failure
+        // so we can distinguish bad surface vs bad context vs not
+        // current thread vs surface-was-destroyed cases. After the
+        // first time we just log nothing — the SFML render loop
+        // calls us 60+ times a second.
+        static bool warnedActivateFail = false;
+        if (!warnedActivateFail)
+        {
+            warnedActivateFail = true;
+            err() << "[EaglContext] makeCurrent(true) eglMakeCurrent failed (0x"
+                  << std::hex << eglGetError() << std::dec
+                  << "); surface=" << (surface == EGL_NO_SURFACE ? "no" : "yes")
+                  << " context=" << (context == EGL_NO_CONTEXT ? "no" : "yes")
+                  << std::endl;
+        }
+        return false;
     }
 
     return eglMakeCurrent(display, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT) == EGL_TRUE;
