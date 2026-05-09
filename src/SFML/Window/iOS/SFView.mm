@@ -29,6 +29,7 @@
 #include <SFML/Window/iOS/SFAppDelegate.hpp>
 #include <SFML/System/Utf.hpp>
 #include <QuartzCore/CAMetalLayer.h>
+#include <Metal/MTLPixelFormat.h>
 #include <cstring>
 
 @interface SFView()
@@ -191,12 +192,17 @@
         self.touches = [NSMutableArray array];
 
         // Configure the Metal layer for ANGLE consumption.
-        // CAMetalLayer is opaque-by-default; framebuffer-only flag
-        // off because SFML's GL code may glReadPixels for screen-
-        // capture or post-processing.
         CAMetalLayer* metalLayer = (CAMetalLayer*)self.layer;
         metalLayer.opaque = YES;
         metalLayer.framebufferOnly = NO;
+        // CAMetalLayer doesn't derive drawableSize from bounds
+        // automatically — leaving it at default (0, 0) makes
+        // nextDrawable return nil and ANGLE's swap silently no-ops.
+        // Set it explicitly from frame * contentsScale, matching the
+        // pixel grid SFML expects.
+        metalLayer.drawableSize = CGSizeMake(
+            frame.size.width * factor, frame.size.height * factor);
+        metalLayer.pixelFormat = MTLPixelFormatBGRA8Unorm;
 
         // Enable user interactions on the view (multi-touch events)
         self.userInteractionEnabled = true;

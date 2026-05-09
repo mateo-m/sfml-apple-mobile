@@ -83,7 +83,46 @@ WindowImplUIKit::WindowImplUIKit(VideoMode mode,
 
         // Create the window
         CGRect frame = [UIScreen mainScreen].bounds; // Ignore user size, it wouldn't make sense to use something else
-        m_window = [[UIWindow alloc] initWithFrame:frame];
+        // mkxp-ios: on iOS 13+ multi-scene apps, a UIWindow created
+        // with -initWithFrame: doesn't attach to any UIWindowScene
+        // and never lays out / displays. Find the active foreground
+        // scene from the host app and bind the SFML window to it so
+        // it actually shows. Falls back to the legacy initWithFrame:
+        // path on iOS 12 or in the rare case no foreground scene is
+        // available yet.
+        UIWindowScene* foregroundScene = nil;
+        for (UIScene* scene in [UIApplication sharedApplication].connectedScenes)
+        {
+            if (scene.activationState == UISceneActivationStateForegroundActive
+                && [scene isKindOfClass:[UIWindowScene class]])
+            {
+                foregroundScene = (UIWindowScene*)scene;
+                break;
+            }
+        }
+        if (!foregroundScene)
+        {
+            for (UIScene* scene in [UIApplication sharedApplication].connectedScenes)
+            {
+                if ([scene isKindOfClass:[UIWindowScene class]])
+                {
+                    foregroundScene = (UIWindowScene*)scene;
+                    break;
+                }
+            }
+        }
+        if (foregroundScene)
+        {
+            m_window = [[UIWindow alloc] initWithWindowScene:foregroundScene];
+            m_window.frame = frame;
+        }
+        else
+        {
+            m_window = [[UIWindow alloc] initWithFrame:frame];
+        }
+        // Layer above the host app's main window so the game render
+        // is visible even if the host has its own UIWindow open.
+        m_window.windowLevel = UIWindowLevelNormal + 2;
         m_hasFocus = true;
 
         // Assign it to the application delegate
@@ -100,10 +139,27 @@ WindowImplUIKit::WindowImplUIKit(VideoMode mode,
         m_view = [[SFView alloc] initWithFrame:viewRect andContentScaleFactor:(static_cast<double>(m_backingScale))];
         [m_view resignFirstResponder];
 
-        // Create the view controller
-        m_viewController = [SFViewController alloc];
-        m_viewController.view = m_view;
+        // Create the view controller. mkxp-ios: original SFML code
+        // had `[SFViewController alloc]` without an `init`, leaving
+        // the UIViewController without its designated initializer
+        // run. UIKit then misroutes a number of calls (view loading,
+        // safe area, layout) and the view never displays. Use the
+        // proper `[[... alloc] initWithNibName:bundle:]` pattern.
+        // We can't safely set `.view = m_view` before -loadView
+        // fires, so let UIKit create its default view, then add the
+        // SFView as a subview that fills the bounds.
+        m_viewController = [[SFViewController alloc] initWithNibName:nil bundle:nil];
         m_viewController.orientationCanChange = style & Style::Resize;
+        // Force the view controller's view to load by accessing it,
+        // then drop our SFView in. The container view fills the
+        // window; the SFView fills the container so resizes
+        // propagate via autoresizing.
+        UIView* containerView = m_viewController.view;
+        containerView.backgroundColor = [UIColor blackColor];
+        m_view.frame = containerView.bounds;
+        m_view.autoresizingMask = UIViewAutoresizingFlexibleWidth
+                                | UIViewAutoresizingFlexibleHeight;
+        [containerView addSubview:m_view];
         m_window.rootViewController = m_viewController;
 
         // Make it the current window

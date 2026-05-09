@@ -387,9 +387,36 @@ void EaglContext::display()
     EGLDisplay display = static_cast<EGLDisplay>(m_display);
     EGLSurface surface = static_cast<EGLSurface>(m_surface);
     if (display == EGL_NO_DISPLAY || surface == EGL_NO_SURFACE)
+    {
+        static bool warnedNoSurface = false;
+        if (!warnedNoSurface)
+        {
+            warnedNoSurface = true;
+            err() << "[EaglContext] display: skipping eglSwapBuffers; "
+                  << "display=" << (display == EGL_NO_DISPLAY ? "no" : "yes")
+                  << " surface=" << (surface == EGL_NO_SURFACE ? "no" : "yes")
+                  << std::endl;
+        }
         return;
+    }
 
-    eglSwapBuffers(display, surface);
+    static bool firstSwap = true;
+    if (firstSwap)
+    {
+        firstSwap = false;
+        err() << "[EaglContext] first eglSwapBuffers reached" << std::endl;
+    }
+
+    if (eglSwapBuffers(display, surface) != EGL_TRUE)
+    {
+        static bool warnedSwapFail = false;
+        if (!warnedSwapFail)
+        {
+            warnedSwapFail = true;
+            err() << "[EaglContext] eglSwapBuffers failed (0x"
+                  << std::hex << eglGetError() << std::dec << ")" << std::endl;
+        }
+    }
 
     // CADisplayLink would be the proper iOS v-sync, but mirroring
     // the original EAGL implementation we fake it with a frame-rate
