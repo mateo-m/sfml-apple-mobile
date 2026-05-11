@@ -98,6 +98,23 @@ void ensureExtensionsInit()
         if (auto p = load("glGenerateMipmap"))
             sf_glad_glGenerateMipmapOES = reinterpret_cast<PFNGLGENERATEMIPMAPOESPROC>(p);
 
+        // mkxp-ios: ANGLE-on-Metal advertises GLES2 / EGL_KHR_image
+        // etc., NOT the GLES1-era GL_OES_framebuffer_object extension
+        // string. SFML's `RenderTextureImplFBO::isAvailable()` keys
+        // off `SF_GLAD_GL_OES_framebuffer_object`, which glad parses
+        // from the extension list, so it's 0 here even though the
+        // core GLES2 FBO entry points are fully functional (we just
+        // aliased them above). Without this, every sf::RenderTexture
+        // falls back to `RenderTextureImplDefault`, which spins up an
+        // offscreen pbuffer context, draws into it, and copies pixels
+        // back via glCopyTexSubImage2D. PSDK uses RTs heavily; the
+        // fallback path renders correctly into the pbuffer but the
+        // copy lands in a tiny (320x240) corner of the user-visible
+        // framebuffer because glViewport was set for the pbuffer
+        // size. Forcing the flag here keeps SFML on its (working)
+        // FBO path.
+        SF_GLAD_GL_OES_framebuffer_object = 1;
+
         // mkxp-ios: install our GLES1 fixed-function emulator on top
         // of the active GLES2 context. ANGLE's own GLES1-on-Metal
         // emulator crashes during the first FBO setup; we sidestep
