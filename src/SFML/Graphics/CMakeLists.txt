@@ -19,6 +19,8 @@ set(SRC
     ${SRCROOT}/GLCheck.hpp
     ${SRCROOT}/GLExtensions.hpp
     ${SRCROOT}/GLExtensions.cpp
+    ${SRCROOT}/GLES1Emu.hpp
+    ${SRCROOT}/GLES1Emu.cpp
     ${SRCROOT}/Image.cpp
     ${INCROOT}/Image.hpp
     ${SRCROOT}/ImageLoader.cpp

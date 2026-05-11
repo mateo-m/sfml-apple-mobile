@@ -26,6 +26,7 @@
 // Headers
 ////////////////////////////////////////////////////////////
 #include <SFML/Graphics/GLExtensions.hpp>
+#include <SFML/Graphics/GLES1Emu.hpp>
 #include <SFML/Window/Context.hpp>
 #include <SFML/System/Err.hpp>
 
@@ -96,6 +97,13 @@ void ensureExtensionsInit()
             sf_glad_glRenderbufferStorageOES = reinterpret_cast<PFNGLRENDERBUFFERSTORAGEOESPROC>(p);
         if (auto p = load("glGenerateMipmap"))
             sf_glad_glGenerateMipmapOES = reinterpret_cast<PFNGLGENERATEMIPMAPOESPROC>(p);
+
+        // mkxp-ios: install our GLES1 fixed-function emulator on top
+        // of the active GLES2 context. ANGLE's own GLES1-on-Metal
+        // emulator crashes during the first FBO setup; we sidestep
+        // it by intercepting SFML's glad pointers and re-implementing
+        // the handful of fixed-function calls SFML actually uses.
+        installGLES1Emu();
 #else
         gladLoadGL(reinterpret_cast<GLADloadfunc>(sf::Context::getFunction));
 #endif
