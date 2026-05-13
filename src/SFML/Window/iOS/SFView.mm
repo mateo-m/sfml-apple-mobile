@@ -30,11 +30,24 @@
 #include <SFML/System/Utf.hpp>
 #include <QuartzCore/CAMetalLayer.h>
 #include <Metal/MTLPixelFormat.h>
+#include <Metal/MTLDevice.h>
 #include <cstring>
 
 @interface SFView()
 
-@property (nonatomic) NSMutableArray* touches;
+// mkxp-ios: SFML's cmake enables ARC via `sfml_set_xcode_property
+// CLANG_ENABLE_OBJC_ARC YES`, but that property only takes effect
+// under the Xcode generator. With Unix Makefiles / Ninja the .mm
+// files compile under MRC, where `@property (nonatomic)` defaults
+// to `assign`. The autoreleased `[NSMutableArray array]` returned
+// by initWithFrame: gets freed at the next pool drain, leaving
+// `self.touches` dangling; a later touchesBegan: then sends
+// `addObject:` to whatever immutable NSArray now occupies that
+// memory, crashing with `__NSArrayI unrecognized selector`.
+//
+// Make the ownership explicit so the setter retains regardless of
+// ARC mode. `strong` is a synonym for `retain` under MRC.
+@property (nonatomic, strong) NSMutableArray* touches;
 
 @end
 
@@ -194,7 +207,14 @@
         // Configure the Metal layer for ANGLE consumption.
         CAMetalLayer* metalLayer = (CAMetalLayer*)self.layer;
         metalLayer.opaque = YES;
-        metalLayer.framebufferOnly = NO;
+        // ANGLE-on-Metal needs framebufferOnly=YES for the swap chain
+        // to present drawable contents to the visible layer. With NO,
+        // eglSwapBuffers reports success but the layer keeps showing
+        // its background colour and never picks up the drawable's
+        // content (root cause of the long-standing all-black render
+        // after PSDK boot). YES costs nothing here because we never
+        // sample the swap-chain drawable as a texture.
+        metalLayer.framebufferOnly = YES;
         // CAMetalLayer doesn't derive drawableSize from bounds
         // automatically — leaving it at default (0, 0) makes
         // nextDrawable return nil and ANGLE's swap silently no-ops.
@@ -203,6 +223,13 @@
         metalLayer.drawableSize = CGSizeMake(
             frame.size.width * factor, frame.size.height * factor);
         metalLayer.pixelFormat = MTLPixelFormatBGRA8Unorm;
+        // mkxp-ios: ANGLE-on-Metal needs the CAMetalLayer to have an
+        // explicit MTLDevice set; without it nextDrawable returns nil
+        // and eglSwapBuffers reports success but nothing reaches the
+        // display (visible as "container bg shows through but layer
+        // contents stay empty"). Assign the system default device so
+        // ANGLE's swap actually presents.
+        metalLayer.device = MTLCreateSystemDefaultDevice();
 
         // Enable user interactions on the view (multi-touch events)
         self.userInteractionEnabled = true;

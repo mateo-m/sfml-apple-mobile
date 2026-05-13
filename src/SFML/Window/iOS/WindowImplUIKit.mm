@@ -120,9 +120,28 @@ WindowImplUIKit::WindowImplUIKit(VideoMode mode,
         {
             m_window = [[UIWindow alloc] initWithFrame:frame];
         }
-        // Layer above the host app's main window so the game render
-        // is visible even if the host has its own UIWindow open.
+        // mkxp-ios: place the SFML window so the host's transparent
+        // overlay (Empo's AppWindow at UIWindowLevelNormal + 1) can
+        // sit above it and host the on-screen gamepad. The overlay's
+        // hit-test returns nil for non-control regions so taps still
+        // reach SFView::touchesBegan:.
+        //
+        // iOS Simulator caveat: sim's Metal compositor reads the
+        // CAMetalLayer's occlusion state at eglCreateWindowSurface
+        // time and won't issue a real drawable for a layer that was
+        // covered by an opaque host view (e.g. Empo's loading
+        // splash). The surface ends up permanently bound to a dead
+        // drawable; every eglSwapBuffers returns EGL_BAD_SURFACE.
+        // Device's Metal compositor doesn't have this restriction.
+        // Work around by putting the SFML window on top on sim — the
+        // game renders correctly there but the host's controls
+        // overlay is hidden. Sim is a development tool; device is
+        // the deployment target.
+#if TARGET_OS_SIMULATOR
         m_window.windowLevel = UIWindowLevelNormal + 2;
+#else
+        m_window.windowLevel = UIWindowLevelNormal;
+#endif
         m_hasFocus = true;
 
         // Assign it to the application delegate
@@ -154,16 +173,42 @@ WindowImplUIKit::WindowImplUIKit(VideoMode mode,
         // then drop our SFView in. The container view fills the
         // window; the SFView fills the container so resizes
         // propagate via autoresizing.
+        // Assign to the window first so UIKit sizes the controller's
+        // view to the window's bounds; only then add the SFView as a
+        // subview that fills it. Without this ordering the controller's
+        // view is at the default screen size when we add SFView and the
+        // autoresizing mask doesn't always re-snap to the actual window
+        // bounds.
+        m_window.rootViewController = m_viewController;
         UIView* containerView = m_viewController.view;
-        containerView.backgroundColor = [UIColor blackColor];
         m_view.frame = containerView.bounds;
         m_view.autoresizingMask = UIViewAutoresizingFlexibleWidth
                                 | UIViewAutoresizingFlexibleHeight;
         [containerView addSubview:m_view];
-        m_window.rootViewController = m_viewController;
 
         // Make it the current window
         [m_window makeKeyAndVisible];
+        // Defer scene-window dump to next runloop tick so we capture
+        // the post-makeKeyAndVisible state and any layoutSubviews
+        // pass that fires in response.
+        UIWindowScene* sceneCapture = foregroundScene;
+        UIWindow* myWin = m_window;
+        SFView* myView = m_view;
+        dispatch_async(dispatch_get_main_queue(), ^{
+            NSLog(@"[mkxp-ios] Post-display window dump (1 runloop tick later):");
+            for (UIWindow* w in sceneCapture.windows)
+            {
+                NSLog(@"  - %@ level=%g hidden=%d alpha=%g key=%d",
+                      w, w.windowLevel, w.hidden, (double)w.alpha, w.isKeyWindow);
+            }
+            NSLog(@"  myWindow.rootViewController.view.frame = %@",
+                  NSStringFromCGRect(myWin.rootViewController.view.frame));
+            NSLog(@"  myView.frame = %@ superview = %@",
+                  NSStringFromCGRect(myView.frame), myView.superview);
+            NSLog(@"  myView.layer = %@ contentsScale=%g drawableSize=%@",
+                  myView.layer, (double)myView.layer.contentsScale,
+                  NSStringFromCGSize(((CAMetalLayer*)myView.layer).drawableSize));
+        });
     };
 
     if ([NSThread isMainThread]) {

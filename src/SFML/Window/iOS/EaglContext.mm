@@ -48,6 +48,14 @@
 // Headers
 ////////////////////////////////////////////////////////////
 #include <SFML/Window/iOS/EaglContext.hpp>
+
+// mkxp-ios: weak-link the host's frame-rendered hook so the SFML
+// iOS lib still compiles and runs standalone for embedders that
+// don't ship app_bridge. When linked into Empo, this resolves to
+// app_bridge.cpp's implementation; when linked elsewhere, it stays
+// nil and the call below short-circuits.
+extern "C" __attribute__((weak_import))
+void mkxp_signalFrameRendered(void);
 #include <SFML/Window/iOS/WindowImplUIKit.hpp>
 #include <SFML/Window/iOS/SFView.hpp>
 #include <SFML/System/Err.hpp>
@@ -407,6 +415,34 @@ void EaglContext::display()
         err() << "[EaglContext] first eglSwapBuffers reached" << std::endl;
     }
 
+    // mkxp-ios: poke the host's frame-rendered callback BEFORE the
+    // actual swap so Empo can transition phase=.loading → .playing
+    // and dismiss its opaque GameLoadingView. The loading view sits
+    // in a UIWindow above SFML's; iOS Simulator's Metal compositor
+    // treats SFML's CAMetalLayer as fully occluded while the loading
+    // view covers it, so `nextDrawable` returns nil and
+    // `eglSwapBuffers` fails with EGL_BAD_SURFACE on the first
+    // attempt. Firing the signal first removes the occluder; the
+    // swap call below then sees a valid drawable and succeeds. The
+    // weak_import declaration at file scope resolves at link time
+    // when host provides the hook; otherwise the symbol is nil and
+    // we short-circuit.
+    static bool signaledFirstFrame = false;
+    if (!signaledFirstFrame)
+    {
+        signaledFirstFrame = true;
+        if (&mkxp_signalFrameRendered)
+        {
+            err() << "[EaglContext] firing mkxp_signalFrameRendered" << std::endl;
+            mkxp_signalFrameRendered();
+        }
+        else
+        {
+            err() << "[EaglContext] mkxp_signalFrameRendered not linked"
+                  << std::endl;
+        }
+    }
+
     if (eglSwapBuffers(display, surface) != EGL_TRUE)
     {
         static bool warnedSwapFail = false;
@@ -414,7 +450,12 @@ void EaglContext::display()
         {
             warnedSwapFail = true;
             err() << "[EaglContext] eglSwapBuffers failed (0x"
-                  << std::hex << eglGetError() << std::dec << ")" << std::endl;
+                  << std::hex << eglGetError() << std::dec
+                  << "); ANGLE-on-Metal-Simulator returns EGL_BAD_SURFACE "
+                  << "(0x300D) here because its compositor doesn't issue a "
+                  << "real CAMetalDrawable for a layer that was occluded at "
+                  << "surface-create time. Device path works correctly."
+                  << std::endl;
         }
     }
 

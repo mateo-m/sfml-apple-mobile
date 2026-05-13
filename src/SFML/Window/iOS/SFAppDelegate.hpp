@@ -101,6 +101,27 @@
 - (void)notifyCharacter:(sf::Uint32)character;
 
 ////////////////////////////////////////////////////////////
+/// \brief Forward a synthetic key-down event to the active
+/// sf::Window. Used by host apps with on-screen gamepad UI
+/// (no physical keyboard on iOS) to feed engines that read
+/// input via Window event callbacks (KeyPressed) instead of
+/// sf::Keyboard polling.
+///
+/// \param scancode The pressed scancode
+///
+////////////////////////////////////////////////////////////
+- (void)notifyKeyDown:(sf::Keyboard::Scancode)scancode;
+
+////////////////////////////////////////////////////////////
+/// \brief Forward a synthetic key-up event to the active
+/// sf::Window. See `notifyKeyDown:` for context.
+///
+/// \param scancode The released scancode
+///
+////////////////////////////////////////////////////////////
+- (void)notifyKeyUp:(sf::Keyboard::Scancode)scancode;
+
+////////////////////////////////////////////////////////////
 /// \brief Tells if the dimensions of the current window must be flipped when switching to a given orientation
 ///
 /// \param orientation the device has changed to

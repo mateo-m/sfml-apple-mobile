@@ -42,7 +42,13 @@ namespace
 
 @interface SFAppDelegate()
 
-@property (nonatomic) CMMotionManager* motionManager;
+// mkxp-ios: see SFView.mm for the MRC vs ARC default-ownership
+// rationale. CMMotionManager is allocated via `[[CMMotionManager
+// alloc] init]` so the +1 retain count survives the assignment,
+// but a later `self.motionManager = ...` site would leak under
+// MRC. Mark `strong` so the synthesized setter retains/releases
+// regardless of ARC mode.
+@property (nonatomic, strong) CMMotionManager* motionManager;
 
 @end
 
@@ -347,6 +353,42 @@ namespace
         sf::Event event;
         event.type = sf::Event::TextEntered;
         event.text.unicode = character;
+        sfWindow->forwardEvent(event);
+    }
+}
+
+
+////////////////////////////////////////////////////////////
+- (void)notifyKeyDown:(sf::Keyboard::Scancode)scancode
+{
+    if (self.sfWindow)
+    {
+        sf::Event event;
+        event.type = sf::Event::KeyPressed;
+        event.key.code = sf::Keyboard::localize(scancode);
+        event.key.scancode = scancode;
+        event.key.alt = false;
+        event.key.control = false;
+        event.key.shift = false;
+        event.key.system = false;
+        sfWindow->forwardEvent(event);
+    }
+}
+
+
+////////////////////////////////////////////////////////////
+- (void)notifyKeyUp:(sf::Keyboard::Scancode)scancode
+{
+    if (self.sfWindow)
+    {
+        sf::Event event;
+        event.type = sf::Event::KeyReleased;
+        event.key.code = sf::Keyboard::localize(scancode);
+        event.key.scancode = scancode;
+        event.key.alt = false;
+        event.key.control = false;
+        event.key.shift = false;
+        event.key.system = false;
         sfWindow->forwardEvent(event);
     }
 }
