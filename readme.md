@@ -82,3 +82,5 @@ In short, SFML is free for any use (commercial or personal, proprietary or open-
 -   [_Mbed TLS_](https://github.com/Mbed-TLS/mbedtls) is under the [Apache license or the GPL license](https://github.com/Mbed-TLS/mbedtls/blob/main/LICENSE)
 -   [_wepoll_](https://github.com/piscisaureus/wepoll) is under the [BSD license](https://github.com/piscisaureus/wepoll/blob/dist/LICENSE)
 -   [_libssh2_](https://github.com/libssh2/libssh2) is under the [BSD license](https://github.com/libssh2/libssh2/blob/master/COPYING)
+-   [_PlutoVG_](https://github.com/sammycage/plutovg) is under the [MIT license](https://github.com/sammycage/plutovg/blob/master/LICENSE)
+-   [_PlutoSVG_](https://github.com/sammycage/plutosvg) is under the [MIT license](https://github.com/sammycage/plutosvg/blob/master/LICENSE)

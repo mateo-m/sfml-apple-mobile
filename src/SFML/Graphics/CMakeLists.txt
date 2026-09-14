@@ -275,6 +275,64 @@ if(BUILD_SHARED_LIBS OR SFML_OS_ANDROID)
     set_target_properties(SheenBidi PROPERTIES POSITION_INDEPENDENT_CODE ON)
 endif()
 
+# we have to build PlutoVG and PlutoSVG ourselves for SVG emoji support
+# use a block to scope option variables we have to set
+block()
+    include(FetchContent)
+
+    set(CMAKE_POLICY_DEFAULT_CMP0077 NEW)
+    set(BUILD_SHARED_LIBS OFF)
+
+    # Fetch PlutoVG first (PlutoSVG depends on it)
+    # - Disable installation
+    set(PLUTOVG_BUILD_EXAMPLES OFF)
+    FetchContent_Declare(PlutoVG
+        GIT_REPOSITORY https://github.com/sammycage/plutovg.git
+        GIT_TAG v1.3.3
+        GIT_SHALLOW ON)
+    FetchContent_MakeAvailable(PlutoVG)
+
+    # Let PlutoSVG build its own FreeType integration using the already fetched FreeType.
+    set(PLUTOSVG_ENABLE_FREETYPE ON)
+    set(PLUTOSVG_BUILD_EXAMPLES OFF)
+
+    # Fetch PlutoSVG without submodule and use the already fetched PlutoVG.
+    FetchContent_Declare(PlutoSVG
+        GIT_REPOSITORY https://github.com/sammycage/plutosvg.git
+        GIT_TAG v0.0.8
+        GIT_SHALLOW ON
+        GIT_SUBMODULES "" # Skip the submodules
+        # patch out parts we don't want of the PlutoSVG CMake configuration
+        # - exporting the build tree
+        PATCH_COMMAND ${CMAKE_COMMAND} -DPLUTOSVG_DIR=${FETCHCONTENT_BASE_DIR}/plutosvg-src -P ${PROJECT_SOURCE_DIR}/tools/plutosvg/PatchPlutoSVG.cmake)
+    FetchContent_MakeAvailable(PlutoSVG)
+endblock()
+
+set_target_properties(plutovg plutosvg PROPERTIES FOLDER "Dependencies")
+
+# disable building PlutoVG and PlutoSVG as part of our unity build
+set_target_properties(plutovg plutosvg PROPERTIES UNITY_BUILD OFF)
+
+# plutosvg needs to link to plutovg
+target_link_libraries(plutosvg PRIVATE plutovg)
+
+sfml_set_stdlib(plutovg)
+sfml_set_stdlib(plutosvg)
+
+# Link PlutoVG and PlutoSVG to sfml-graphics
+target_link_libraries(sfml-graphics PRIVATE plutovg plutosvg)
+target_include_directories(sfml-graphics SYSTEM PRIVATE "${PlutoVG_SOURCE_DIR}/include" "${PlutoSVG_SOURCE_DIR}/source")
+
+# Disable all warnings for PlutoVG and PlutoSVG
+target_compile_options(plutovg PRIVATE -w)
+target_compile_options(plutosvg PRIVATE -w)
+
+# if building SFML as a shared library or on android (where exes are shared libs) and linking our dependencies in
+# as static libraries we need to build them with -fPIC
+if(BUILD_SHARED_LIBS OR SFML_OS_ANDROID)
+    set_target_properties(plutovg plutosvg PROPERTIES POSITION_INDEPENDENT_CODE ON)
+endif()
+
 # add preprocessor symbols
 target_compile_definitions(sfml-graphics PRIVATE "STBI_FAILURE_USERMSG")
 
