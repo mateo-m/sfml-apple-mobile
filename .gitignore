@@ -39,3 +39,6 @@ build/
 .vs/
 .vscode/
 .idea/
+
+# Empo build folders (common.make CMAKE_BUILDDIR)
+cmakebuild-*/
