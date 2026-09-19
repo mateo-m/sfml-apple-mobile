@@ -50,10 +50,15 @@ namespace
 // regardless of ARC mode.
 @property (nonatomic, strong) CMMotionManager* motionManager;
 
+- (void)registerForOrientationChanges;
+
 @end
 
 
 @implementation SFAppDelegate
+{
+    bool orientationNotificationsRegistered;
+}
 
 @synthesize sfWindow;
 @synthesize backingScaleFactor;
@@ -74,6 +79,7 @@ namespace
         delegateInstance = [[SFAppDelegate alloc] init];
         [delegateInstance initBackingScale];
         delegateInstance.motionManager = [[CMMotionManager alloc] init];
+        [delegateInstance registerForOrientationChanges];
     }
     return delegateInstance;
 }
@@ -98,9 +104,7 @@ namespace
     // Instantiate the motion manager
     self.motionManager = [[CMMotionManager alloc] init];
 
-    // Register orientation changes notifications
-    [[UIDevice currentDevice] beginGeneratingDeviceOrientationNotifications];
-    [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(deviceOrientationDidChange:) name:UIDeviceOrientationDidChangeNotification object: nil];
+    [self registerForOrientationChanges];
 
     // Change the working directory to the resources directory
     [[NSFileManager defaultManager] changeCurrentDirectoryPath: [[NSBundle mainBundle] resourcePath]];
@@ -112,6 +116,35 @@ namespace
     return true;
 }
 
+// Both paths into this class have to register, and neither may register
+// twice. UIKit calls didFinishLaunchingWithOptions: only when SFML owns
+// the UIApplication delegate. A host that owns UIApplicationMain itself
+// reaches this class through getInstance's lazy fallback instead, and
+// without this the window never learns the device turned.
+//
+// beginGeneratingDeviceOrientationNotifications is a UIKit call, and
+// getInstance runs on whichever thread asked for the window.
+- (void)registerForOrientationChanges
+{
+    if (orientationNotificationsRegistered)
+        return;
+    orientationNotificationsRegistered = true;
+
+    void (^registerBlock)(void) = ^{
+        [[UIDevice currentDevice] beginGeneratingDeviceOrientationNotifications];
+        [[NSNotificationCenter defaultCenter] addObserver:self
+                                                 selector:@selector(deviceOrientationDidChange:)
+                                                     name:UIDeviceOrientationDidChangeNotification
+                                                   object:nil];
+    };
+    if ([NSThread isMainThread])
+        registerBlock();
+    else
+        dispatch_async(dispatch_get_main_queue(), registerBlock);
+}
+
+
+////////////////////////////////////////////////////////////
 - (void)initBackingScale
 {
     id data = [[NSBundle mainBundle] objectForInfoDictionaryKey:@"NSHighResolutionCapable"];
