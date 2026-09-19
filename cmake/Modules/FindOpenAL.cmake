@@ -113,7 +113,12 @@ if(OPENAL_INCLUDE_DIR AND OPENAL_LIBRARY)
         set_target_properties(OpenAL::OpenAL PROPERTIES
           IMPORTED_LOCATION "${DLL_PATH}"
           IMPORTED_IMPLIB "${OPENAL_LIBRARY}")
-      elseif(APPLE)
+      elseif(APPLE AND IS_DIRECTORY "${OPENAL_LIBRARY}")
+          # This branch opens a .framework bundle, which is a directory, to
+          # reach the library inside it. Without the IS_DIRECTORY test the
+          # find_file below is REQUIRED and stops the configure when
+          # OPENAL_LIBRARY names a plain archive, such as an openal-soft
+          # libopenal.a the caller passed on purpose.
           find_file(OPENAL_FULL_PATH OpenAL OpenAL.tbd PATHS ${OPENAL_LIBRARY} REQUIRED)
           add_library(OpenAL::OpenAL SHARED IMPORTED)
           set_target_properties(OpenAL::OpenAL PROPERTIES
