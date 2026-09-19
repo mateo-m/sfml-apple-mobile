@@ -75,14 +75,15 @@ bool InputImpl::isKeyPressed(Keyboard::Scancode code)
 
 Keyboard::Key InputImpl::localize(Keyboard::Scancode code)
 {
-    // A key event carries both numbers, and a program is free to read
-    // either one. Without this table every event carries Key::Unknown,
-    // which is -1, and a program that reads the key code sees -1 for
-    // every key. PSDK games built before the scancode existed read the
-    // key code, so they answer no key at all.
+    // Nothing in SFML's iOS backend makes a key event. There is no
+    // pressesBegan: and no UIKey in any of its files, so every key event
+    // here arrives through sfml_ios_inject_key_event below and the host
+    // picks the scancode. The table is the US layout, which is the layout
+    // the host numbers its own on-screen controls against.
     //
-    // iOS gives no layout query, and UIKey reports US positions, so this
-    // table is the US layout.
+    // A program is free to read either number off the event. PSDK games
+    // built before the scancode existed read the key code, so without this
+    // table they see -1 for every key and match no key at all.
     switch (code)
     {
         // A..Z and the letter keys share the same order in both enums.
