@@ -114,6 +114,7 @@ private:
     ////////////////////////////////////////////////////////////
     InputStream* m_stream;         //!< Source stream to read from
     unsigned int m_bytesPerSample; //!< Size of a sample, in bytes
+    bool         m_isFloat;        //!< True when the samples are IEEE floats instead of integers
     Uint64       m_dataStart;      //!< Starting position of the audio data in the open file
     Uint64       m_dataEnd;        //!< Position one byte past the end of the audio data in the open file
 };

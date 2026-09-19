@@ -88,14 +88,71 @@ namespace
         return true;
     }
 
+    // A float WAV holds IEEE 754 samples, little endian. Read the bytes as
+    // the integer of the same width, then copy them into the float.
+    // Reading into the float through a cast would break the strict
+    // aliasing rule, and the copy costs no instructions.
+    bool decodeFloat(sf::InputStream& stream, float& value)
+    {
+        sf::Uint32 bits = 0;
+        if (!decode(stream, bits))
+            return false;
+
+        std::memcpy(&value, &bits, sizeof(value));
+
+        return true;
+    }
+
+    bool decodeDouble(sf::InputStream& stream, double& value)
+    {
+        unsigned char bytes[sizeof(value)];
+        if (static_cast<std::size_t>(stream.read(bytes, static_cast<sf::Int64>(sizeof(bytes)))) != sizeof(bytes))
+            return false;
+
+        sf::Uint64 bits = 0;
+        for (std::size_t i = 0; i < sizeof(bytes); ++i)
+            bits |= static_cast<sf::Uint64>(bytes[i]) << (8 * i);
+
+        std::memcpy(&value, &bits, sizeof(value));
+
+        return true;
+    }
+
+    // A float WAV nominally runs -1 to 1, and nothing in the format stops a
+    // file from going past that.
+    //
+    // The scale is 32768, the step count of the negative half, and the clamp
+    // comes after it. That order is what makes 1.0 land on 32767 instead of
+    // wrapping to full negative, and it lets -1.0 reach -32768. Rounding
+    // rather than truncating keeps every sample off a half-step bias toward
+    // zero. The three together match Apple's afconvert on the same file,
+    // sample for sample.
+    sf::Int16 floatToInt16(double value)
+    {
+        double scaled = value * 32768.0 + (value >= 0.0 ? 0.5 : -0.5);
+
+        if (scaled > 32767.0)
+            return 32767;
+        if (scaled < -32768.0)
+            return -32768;
+
+        return static_cast<sf::Int16>(scaled);
+    }
+
     const sf::Uint64 mainChunkSize = 12;
 
     const sf::Uint16 waveFormatPcm = 1;
 
     const sf::Uint16 waveFormatExtensible= 65534;
 
+    const sf::Uint16 waveFormatIeeeFloat = 3;
+
     const char* waveSubformatPcm =
         "\x01\x00\x00\x00\x00\x00\x10\x00"
+        "\x80\x00\x00\xAA\x00\x38\x9B\x71";
+
+    const char* waveSubformatIeeeFloat =
+        "\x03\x00\x00\x00\x00\x00\x10\x00"
         "\x80\x00\x00\xAA\x00\x38\x9B\x71";
 }
 
@@ -119,6 +176,7 @@ bool SoundFileReaderWav::check(InputStream& stream)
 SoundFileReaderWav::SoundFileReaderWav() :
 m_stream        (NULL),
 m_bytesPerSample(0),
+m_isFloat       (false),
 m_dataStart     (0),
 m_dataEnd       (0)
 {
@@ -161,6 +219,27 @@ Uint64 SoundFileReaderWav::read(Int16* samples, Uint64 maxCount)
     // data until EOF, as WAV files may have metadata at the end.
     while ((count < maxCount) && (startPos + count * m_bytesPerSample < m_dataEnd))
     {
+        if (m_isFloat)
+        {
+            double sample = 0;
+            if (m_bytesPerSample == 4)
+            {
+                float single = 0;
+                if (!decodeFloat(*m_stream, single))
+                    return count;
+                sample = single;
+            }
+            else
+            {
+                if (!decodeDouble(*m_stream, sample))
+                    return count;
+            }
+
+            *samples++ = floatToInt16(sample);
+            ++count;
+            continue;
+        }
+
         switch (m_bytesPerSample)
         {
             case 1:
@@ -252,8 +331,9 @@ bool SoundFileReaderWav::parseHeader(Info& info)
             Uint16 format = 0;
             if (!decode(*m_stream, format))
                 return false;
-            if ((format != waveFormatPcm) && (format != waveFormatExtensible))
+            if ((format != waveFormatPcm) && (format != waveFormatIeeeFloat) && (format != waveFormatExtensible))
                 return false;
+            m_isFloat = (format == waveFormatIeeeFloat);
 
             // Channel count
             Uint16 channelCount = 0;
@@ -281,7 +361,15 @@ bool SoundFileReaderWav::parseHeader(Info& info)
             Uint16 bitsPerSample = 0;
             if (!decode(*m_stream, bitsPerSample))
                 return false;
-            if (bitsPerSample != 8 && bitsPerSample != 16 && bitsPerSample != 24 && bitsPerSample != 32)
+            if (m_isFloat)
+            {
+                if (bitsPerSample != 32 && bitsPerSample != 64)
+                {
+                    err() << "Unsupported float sample size: " << bitsPerSample << " bit (Supported float sample sizes are 32/64 bit)" << std::endl;
+                    return false;
+                }
+            }
+            else if (bitsPerSample != 8 && bitsPerSample != 16 && bitsPerSample != 24 && bitsPerSample != 32)
             {
                 err() << "Unsupported sample size: " << bitsPerSample << " bit (Supported sample sizes are 8/16/24/32 bit)" << std::endl;
                 return false;
@@ -310,9 +398,18 @@ bool SoundFileReaderWav::parseHeader(Info& info)
                 if (static_cast<std::size_t>(m_stream->read(subformat, static_cast<Int64>(sizeof(subformat)))) != sizeof(subformat))
                     return false;
 
-                if (std::memcmp(subformat, waveSubformatPcm, sizeof(subformat)) != 0)
+                if (std::memcmp(subformat, waveSubformatIeeeFloat, sizeof(subformat)) == 0)
                 {
-                    err() << "Unsupported format: extensible format with non-PCM subformat" << std::endl;
+                    m_isFloat = true;
+                    if (bitsPerSample != 32 && bitsPerSample != 64)
+                    {
+                        err() << "Unsupported float sample size: " << bitsPerSample << " bit (Supported float sample sizes are 32/64 bit)" << std::endl;
+                        return false;
+                    }
+                }
+                else if (std::memcmp(subformat, waveSubformatPcm, sizeof(subformat)) != 0)
+                {
+                    err() << "Unsupported format: extensible format with a subformat that is neither PCM nor IEEE float" << std::endl;
                     return false;
                 }
 
