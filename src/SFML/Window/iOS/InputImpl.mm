@@ -307,19 +307,19 @@ extern "C" void sfml_ios_inject_scancode(int sfScan, int pressed)
     g_syntheticScans[static_cast<size_t>(sfScan)].store(pressed != 0, std::memory_order_release);
 }
 
-// mkxp-ios: push a real KeyPressed / KeyReleased into the active
-// sf::Window's event queue so engines like LiteRGSS / PSDK that
-// route input through `Window.on_key_pressed` callbacks (instead of
-// polling sf::Keyboard) react to host-injected presses. The polling
-// shims above remain for engines that only check
-// sf::Keyboard::isKeyPressed; this one targets the event-driven
-// path. Both are called from `empo_injectKeyEvent` so the host
-// doesn't need to know which input style the engine uses.
+// mkxp-ios: the event queue and isKeyPressed share no state in this
+// backend. PSDK reads both. LiteRGSS takes the event through
+// `on_key_pressed`, then `Input.press?` asks isKeyPressed on every frame
+// (SfKeyBoard.cpp:8). An event alone leaves that answer false, so the
+// game sees the key once and never as held. Set both states here, so no
+// caller can set one and forget the other.
 extern "C" void sfml_ios_inject_key_event(int sfScan, int pressed)
 {
     if (sfScan < 0 || sfScan >= sf::Keyboard::Scan::ScancodeCount)
         return;
     sf::Keyboard::Scancode scancode = static_cast<sf::Keyboard::Scancode>(sfScan);
+    sfml_ios_inject_scancode(sfScan, pressed);
+    sfml_ios_inject_key(static_cast<int>(sf::Keyboard::localize(scancode)), pressed);
     if (pressed)
         [[SFAppDelegate getInstance] notifyKeyDown:scancode];
     else
