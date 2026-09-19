@@ -51,6 +51,7 @@
 #include <SFML/Window/iOS/WindowImplUIKit.hpp>
 #include <SFML/Window/iOS/SFView.hpp>
 #include <SFML/System/Err.hpp>
+#include <SFML/System/Lock.hpp>
 #include <SFML/System/Sleep.hpp>
 #include <EGL/egl.h>
 #include <UIKit/UIKit.h>
@@ -132,6 +133,7 @@ m_display     (EGL_NO_DISPLAY),
 m_context     (EGL_NO_CONTEXT),
 m_surface     (EGL_NO_SURFACE),
 m_config      (nullptr),
+m_pendingView (nullptr),
 m_vsyncEnabled(false),
 m_clock       ()
 {
@@ -175,6 +177,7 @@ m_display     (EGL_NO_DISPLAY),
 m_context     (EGL_NO_CONTEXT),
 m_surface     (EGL_NO_SURFACE),
 m_config      (nullptr),
+m_pendingView (nullptr),
 m_vsyncEnabled(false),
 m_clock       ()
 {
@@ -246,6 +249,7 @@ m_display     (EGL_NO_DISPLAY),
 m_context     (EGL_NO_CONTEXT),
 m_surface     (EGL_NO_SURFACE),
 m_config      (nullptr),
+m_pendingView (nullptr),
 m_vsyncEnabled(false),
 m_clock       ()
 {
@@ -314,44 +318,60 @@ GlFunctionPointer EaglContext::getFunction(const char* name)
 ////////////////////////////////////////////////////////////
 void EaglContext::recreateRenderBuffers(SFView* glView)
 {
-    EGLDisplay display = static_cast<EGLDisplay>(m_display);
-    EGLConfig  config  = static_cast<EGLConfig>(m_config);
-    (void)static_cast<EGLContext>(m_context); // intentionally unused; see note below
-
-    if (display == EGL_NO_DISPLAY || !glView)
+    if (!glView)
         return;
 
-    EGLSurface oldSurface = static_cast<EGLSurface>(m_surface);
-    if (oldSurface != EGL_NO_SURFACE)
-    {
-        // Release any binding on THIS thread so the destroy below is
-        // legal. If another thread holds the context, that thread's
-        // surface binding becomes stale; SFML's render loop will
-        // re-bind via setActive(true) on its own thread.
-        eglMakeCurrent(display, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
-        eglDestroySurface(display, oldSurface);
-        m_surface = EGL_NO_SURFACE;
-    }
+    // Only hand the view over. UIKit calls this from layoutSubviews on
+    // the main thread, and the surface swap has to happen on the thread
+    // that owns the context. display() picks this up.
+    Lock lock(m_pendingMutex);
+    m_pendingView = (__bridge void*)glView;
+}
 
-    EGLNativeWindowType nativeWindow = (__bridge EGLNativeWindowType)glView.layer;
-    EGLSurface surface = eglCreateWindowSurface(display, config, nativeWindow, nullptr);
+
+////////////////////////////////////////////////////////////
+void EaglContext::replaceSurface(void* view)
+{
+    EGLDisplay display = static_cast<EGLDisplay>(m_display);
+    EGLConfig  config  = static_cast<EGLConfig>(m_config);
+    EGLContext context = static_cast<EGLContext>(m_context);
+    SFView*    glView  = (__bridge SFView*)view;
+
+    // ANGLE gives one window surface per layer, so the old surface has
+    // to go before the new one can exist. Creating first answers
+    // EGL_BAD_ALLOC. Releasing and destroying it from the main thread
+    // instead leaves this thread holding a handle eglMakeCurrent then
+    // refuses, and every later eglSwapBuffers answers EGL_BAD_SURFACE.
+    // Both were measured on the simulator. Only this thread has the
+    // surface current, so only this thread can do the swap.
+    EGLSurface oldSurface = static_cast<EGLSurface>(m_surface);
+    eglMakeCurrent(display, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
+    if (oldSurface != EGL_NO_SURFACE)
+        eglDestroySurface(display, oldSurface);
+    m_surface = EGL_NO_SURFACE;
+
+    // Same main-thread rule as the first creation above.
+    __block EGLSurface surface = EGL_NO_SURFACE;
+    void (^create)(void) = ^{
+        EGLNativeWindowType nativeWindow = (__bridge EGLNativeWindowType)glView.layer;
+        surface = eglCreateWindowSurface(display, config, nativeWindow, nullptr);
+    };
+    if ([NSThread isMainThread])
+        create();
+    else
+        dispatch_sync(dispatch_get_main_queue(), create);
+
     if (surface == EGL_NO_SURFACE)
     {
         err() << "[EaglContext] eglCreateWindowSurface (recreate) failed (0x"
-              << std::hex << eglGetError() << ")" << std::endl;
+              << std::hex << eglGetError() << std::dec << ")" << std::endl;
         return;
     }
     m_surface = surface;
 
-    // mkxp-ios: do NOT eglMakeCurrent here. layoutSubviews fires on
-    // the main thread, but PSDK / mkxp drive the render loop from a
-    // worker thread that needs to claim this EGL context exclusively
-    // via Window::setActive(true). Binding the context to main here
-    // causes every subsequent worker-thread eglMakeCurrent call to
-    // fail with EGL_BAD_ACCESS (0x3002), which manifests as a
-    // tight-loop "Failed to activate the window's context" stream
-    // and a black render. The new surface is fully constructed; the
-    // worker's setActive will pick it up.
+    if (eglMakeCurrent(display, surface, surface, context) != EGL_TRUE)
+        err() << "[EaglContext] eglMakeCurrent on the new surface failed (0x"
+              << std::hex << eglGetError() << std::dec << ")" << std::endl;
 }
 
 
@@ -404,6 +424,16 @@ bool EaglContext::makeCurrent(bool current)
 void EaglContext::display()
 {
     EGLDisplay display = static_cast<EGLDisplay>(m_display);
+
+    void* pendingView = nullptr;
+    {
+        Lock lock(m_pendingMutex);
+        pendingView = m_pendingView;
+        m_pendingView = nullptr;
+    }
+    if (pendingView)
+        replaceSurface(pendingView);
+
     EGLSurface surface = static_cast<EGLSurface>(m_surface);
     if (display == EGL_NO_DISPLAY || surface == EGL_NO_SURFACE)
     {
@@ -419,15 +449,22 @@ void EaglContext::display()
         return;
     }
 
+    // Report the first failure of a run and the recovery that ends it.
+    // A single failure across a resize is normal. A count that never
+    // stops growing is the black screen this file used to have, and
+    // only the recovery line tells the two apart.
+    static unsigned swapFailures = 0;
     if (eglSwapBuffers(display, surface) != EGL_TRUE)
     {
-        static bool warnedSwap = false;
-        if (!warnedSwap)
-        {
-            warnedSwap = true;
+        if (swapFailures++ == 0)
             err() << "[EaglContext] eglSwapBuffers failed (0x"
-                  << std::hex << eglGetError() << ")" << std::endl;
-        }
+                  << std::hex << eglGetError() << std::dec << ")" << std::endl;
+    }
+    else if (swapFailures > 0)
+    {
+        err() << "[EaglContext] eglSwapBuffers recovered after " << swapFailures
+              << " failures" << std::endl;
+        swapFailures = 0;
     }
 
 

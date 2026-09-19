@@ -32,6 +32,7 @@
 #include <SFML/Window/iOS/ObjCType.hpp>
 #include <SFML/System/Vector2.hpp>
 #include <SFML/System/Clock.hpp>
+#include <SFML/System/Mutex.hpp>
 
 
 SFML_DECLARE_OBJC_CLASS(SFView);
@@ -168,6 +169,15 @@ private:
     ////////////////////////////////////////////////////////////
     // Member data
     ////////////////////////////////////////////////////////////
+    /// \brief Replace the window surface, on the thread that owns the
+    ///        context
+    ///
+    /// \param view The SFView whose layer backs the new surface
+    ///
+    ////////////////////////////////////////////////////////////
+    void replaceSurface(void* view);
+
+    ////////////////////////////////////////////////////////////
     // Opaque void*s here so this header doesn't pull in EGL/egl.h
     // (whose typedef set conflicts with SFML's bundled glad/egl.h
     // when both end up in the same translation unit). The .mm file
@@ -176,6 +186,13 @@ private:
     void* m_context;        ///< EGLContext owned by this object
     void* m_surface;        ///< EGLSurface (window or pbuffer)
     void* m_config;         ///< EGLConfig the context was created with
+
+    ////////////////////////////////////////////////////////////
+    // recreateRenderBuffers runs on the main thread, but the whole
+    // surface swap has to run on the thread that owns the context. It
+    // leaves the view here and display() does the work.
+    void* m_pendingView;     ///< SFView whose layer needs a new surface
+    Mutex m_pendingMutex;
     bool  m_vsyncEnabled;   ///< Vertical sync activation flag
     Clock m_clock;          ///< Measures the elapsed time for the fake v-sync implementation
 };
