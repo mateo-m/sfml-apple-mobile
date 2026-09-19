@@ -48,14 +48,6 @@
 // Headers
 ////////////////////////////////////////////////////////////
 #include <SFML/Window/iOS/EaglContext.hpp>
-
-// mkxp-ios: weak-link the host's frame-rendered hook so the SFML
-// iOS lib still compiles and runs standalone for embedders that
-// don't ship app_bridge. When linked into Empo, this resolves to
-// app_bridge.cpp's implementation; when linked elsewhere, it stays
-// nil and the call below short-circuits.
-extern "C" __attribute__((weak_import))
-void mkxp_signalFrameRendered(void);
 #include <SFML/Window/iOS/WindowImplUIKit.hpp>
 #include <SFML/Window/iOS/SFView.hpp>
 #include <SFML/System/Err.hpp>
@@ -215,8 +207,27 @@ m_clock       ()
     SFView* view = window->getGlView();
     if (view)
     {
-        EGLNativeWindowType nativeWindow = (__bridge EGLNativeWindowType)view.layer;
-        EGLSurface surface = eglCreateWindowSurface(display, config, nativeWindow, nullptr);
+        // eglCreateWindowSurface has to run on the main thread. ANGLE's
+        // Metal backend reads the CAMetalLayer here and keeps what it
+        // reads for the life of the surface. Off the main thread it
+        // binds a layer state that never becomes presentable, and then
+        // every eglSwapBuffers returns EGL_BAD_SURFACE and the screen
+        // stays black. Measured on the simulator: 1560 swaps, 1560
+        // failures off the main thread, 0 failures on it.
+        //
+        // SFML calls this from the thread that owns the context, which
+        // is the game thread in a host that keeps the main thread in
+        // its runloop. The recreate path below needs no such guard
+        // because layoutSubviews already runs on the main thread.
+        __block EGLSurface surface = EGL_NO_SURFACE;
+        void (^create)(void) = ^{
+            EGLNativeWindowType nativeWindow = (__bridge EGLNativeWindowType)view.layer;
+            surface = eglCreateWindowSurface(display, config, nativeWindow, nullptr);
+        };
+        if ([NSThread isMainThread])
+            create();
+        else
+            dispatch_sync(dispatch_get_main_queue(), create);
         if (surface == EGL_NO_SURFACE)
         {
             err() << "[EaglContext] eglCreateWindowSurface failed (0x"
@@ -408,56 +419,17 @@ void EaglContext::display()
         return;
     }
 
-    static bool firstSwap = true;
-    if (firstSwap)
-    {
-        firstSwap = false;
-        err() << "[EaglContext] first eglSwapBuffers reached" << std::endl;
-    }
-
-    // mkxp-ios: poke the host's frame-rendered callback BEFORE the
-    // actual swap so Empo can transition phase=.loading → .playing
-    // and dismiss its opaque GameLoadingView. The loading view sits
-    // in a UIWindow above SFML's; iOS Simulator's Metal compositor
-    // treats SFML's CAMetalLayer as fully occluded while the loading
-    // view covers it, so `nextDrawable` returns nil and
-    // `eglSwapBuffers` fails with EGL_BAD_SURFACE on the first
-    // attempt. Firing the signal first removes the occluder; the
-    // swap call below then sees a valid drawable and succeeds. The
-    // weak_import declaration at file scope resolves at link time
-    // when host provides the hook; otherwise the symbol is nil and
-    // we short-circuit.
-    static bool signaledFirstFrame = false;
-    if (!signaledFirstFrame)
-    {
-        signaledFirstFrame = true;
-        if (&mkxp_signalFrameRendered)
-        {
-            err() << "[EaglContext] firing mkxp_signalFrameRendered" << std::endl;
-            mkxp_signalFrameRendered();
-        }
-        else
-        {
-            err() << "[EaglContext] mkxp_signalFrameRendered not linked"
-                  << std::endl;
-        }
-    }
-
     if (eglSwapBuffers(display, surface) != EGL_TRUE)
     {
-        static bool warnedSwapFail = false;
-        if (!warnedSwapFail)
+        static bool warnedSwap = false;
+        if (!warnedSwap)
         {
-            warnedSwapFail = true;
+            warnedSwap = true;
             err() << "[EaglContext] eglSwapBuffers failed (0x"
-                  << std::hex << eglGetError() << std::dec
-                  << "); ANGLE-on-Metal-Simulator returns EGL_BAD_SURFACE "
-                  << "(0x300D) here because its compositor doesn't issue a "
-                  << "real CAMetalDrawable for a layer that was occluded at "
-                  << "surface-create time. Device path works correctly."
-                  << std::endl;
+                  << std::hex << eglGetError() << ")" << std::endl;
         }
     }
+
 
     // CADisplayLink would be the proper iOS v-sync, but mirroring
     // the original EAGL implementation we fake it with a frame-rate

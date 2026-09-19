@@ -120,28 +120,12 @@ WindowImplUIKit::WindowImplUIKit(VideoMode mode,
         {
             m_window = [[UIWindow alloc] initWithFrame:frame];
         }
-        // mkxp-ios: place the SFML window so the host's transparent
-        // overlay (Empo's AppWindow at UIWindowLevelNormal + 1) can
-        // sit above it and host the on-screen gamepad. The overlay's
-        // hit-test returns nil for non-control regions so taps still
-        // reach SFView::touchesBegan:.
-        //
-        // iOS Simulator caveat: sim's Metal compositor reads the
-        // CAMetalLayer's occlusion state at eglCreateWindowSurface
-        // time and won't issue a real drawable for a layer that was
-        // covered by an opaque host view (e.g. Empo's loading
-        // splash). The surface ends up permanently bound to a dead
-        // drawable; every eglSwapBuffers returns EGL_BAD_SURFACE.
-        // Device's Metal compositor doesn't have this restriction.
-        // Work around by putting the SFML window on top on sim — the
-        // game renders correctly there but the host's controls
-        // overlay is hidden. Sim is a development tool; device is
-        // the deployment target.
-#if TARGET_OS_SIMULATOR
-        m_window.windowLevel = UIWindowLevelNormal + 2;
-#else
+        // Keep the SFML window below the host's transparent overlay
+        // (Empo's AppWindow at UIWindowLevelNormal + 1), which holds
+        // the on-screen gamepad. The overlay's hit-test returns nil
+        // for non-control regions, so taps still reach
+        // SFView::touchesBegan:.
         m_window.windowLevel = UIWindowLevelNormal;
-#endif
         m_hasFocus = true;
 
         // Assign it to the application delegate
@@ -188,27 +172,6 @@ WindowImplUIKit::WindowImplUIKit(VideoMode mode,
 
         // Make it the current window
         [m_window makeKeyAndVisible];
-        // Defer scene-window dump to next runloop tick so we capture
-        // the post-makeKeyAndVisible state and any layoutSubviews
-        // pass that fires in response.
-        UIWindowScene* sceneCapture = foregroundScene;
-        UIWindow* myWin = m_window;
-        SFView* myView = m_view;
-        dispatch_async(dispatch_get_main_queue(), ^{
-            NSLog(@"[mkxp-ios] Post-display window dump (1 runloop tick later):");
-            for (UIWindow* w in sceneCapture.windows)
-            {
-                NSLog(@"  - %@ level=%g hidden=%d alpha=%g key=%d",
-                      w, w.windowLevel, w.hidden, (double)w.alpha, w.isKeyWindow);
-            }
-            NSLog(@"  myWindow.rootViewController.view.frame = %@",
-                  NSStringFromCGRect(myWin.rootViewController.view.frame));
-            NSLog(@"  myView.frame = %@ superview = %@",
-                  NSStringFromCGRect(myView.frame), myView.superview);
-            NSLog(@"  myView.layer = %@ contentsScale=%g drawableSize=%@",
-                  myView.layer, (double)myView.layer.contentsScale,
-                  NSStringFromCGSize(((CAMetalLayer*)myView.layer).drawableSize));
-        });
     };
 
     if ([NSThread isMainThread]) {
