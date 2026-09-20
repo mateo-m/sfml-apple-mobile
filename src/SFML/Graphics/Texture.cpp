@@ -65,6 +65,21 @@ namespace
 }
 
 
+// mkxp-ios: a host app lets the player pick a smooth or a sharp picture.
+// The picture scales up from the game's own resolution with the GL
+// viewport, so the filter of each texture decides how the whole picture
+// looks. The host app defines this function. A build without one links,
+// because the symbol is weak, and keeps the sharp picture.
+extern "C" __attribute__((weak)) int psdk_smooth_scaling_enabled(void);
+
+namespace
+{
+    bool defaultSmooth()
+    {
+        return psdk_smooth_scaling_enabled && psdk_smooth_scaling_enabled() != 0;
+    }
+}
+
 namespace sf
 {
 ////////////////////////////////////////////////////////////
@@ -72,7 +87,7 @@ Texture::Texture() :
 m_size         (0, 0),
 m_actualSize   (0, 0),
 m_texture      (0),
-m_isSmooth     (false),
+m_isSmooth     (defaultSmooth()),
 m_sRgb         (false),
 m_isRepeated   (false),
 m_pixelsFlipped(false),
