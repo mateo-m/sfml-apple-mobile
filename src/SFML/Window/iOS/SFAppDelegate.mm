@@ -147,11 +147,14 @@ namespace
 ////////////////////////////////////////////////////////////
 - (void)initBackingScale
 {
-    id data = [[NSBundle mainBundle] objectForInfoDictionaryKey:@"NSHighResolutionCapable"];
-    if(data && [data boolValue])
-        backingScaleFactor = [[UIScreen mainScreen] scale];
-    else
-        backingScaleFactor = 1;
+    // mkxp-ios: upstream reads NSHighResolutionCapable and falls back to
+    // 1. That key is a macOS key. UIKit ignores it, and a view on iOS
+    // takes the screen scale by default, so the fallback gave a drawable
+    // at a third of the screen on a 3x phone. iOS then stretched that
+    // drawable to the screen, and every glyph lost two pixels out of
+    // three. A launcher must not need an undocumented plist key to get
+    // the picture its screen can show.
+    backingScaleFactor = [[UIScreen mainScreen] scale];
 }
 
 ////////////////////////////////////////////////////////////
