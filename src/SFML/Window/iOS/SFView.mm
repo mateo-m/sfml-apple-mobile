@@ -49,6 +49,10 @@
 // ARC mode. `strong` is a synonym for `retain` under MRC.
 @property (nonatomic, strong) NSMutableArray* touches;
 
+// The size layoutSubviews last reported, so a layout pass that keeps
+// the size sends no event.
+@property (nonatomic) CGSize reportedSize;
+
 @end
 
 
@@ -176,6 +180,29 @@
 ////////////////////////////////////////////////////////////
 - (void)layoutSubviews
 {
+    // mkxp-ios: the drawable takes this view's size, and the window
+    // keeps its own copy of that size for the drawing code. Upstream
+    // updates the copy from the device orientation notification. That
+    // path asks the root view controller for permission first, and a
+    // window made without sf::Style::Resize answers no. The copy then
+    // keeps the size the window had at creation, and every later frame
+    // draws in a rectangle of the wrong shape. The layout is the event
+    // that says the drawable changed.
+    CGSize size = CGSizeMake(self.bounds.size.width * self.contentScaleFactor,
+                             self.bounds.size.height * self.contentScaleFactor);
+    if (!CGSizeEqualToSize(size, self.reportedSize))
+    {
+        self.reportedSize = size;
+        if (sf::priv::WindowImplUIKit* window = [SFAppDelegate getInstance].sfWindow)
+        {
+            sf::Event event;
+            event.type = sf::Event::Resized;
+            event.size.width = static_cast<unsigned int>(size.width);
+            event.size.height = static_cast<unsigned int>(size.height);
+            window->forwardEvent(event);
+        }
+    }
+
     // update the attached context's buffers
     if (self.context)
         self.context->recreateRenderBuffers(self);
