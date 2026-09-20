@@ -179,6 +179,16 @@ WindowImplUIKit::WindowImplUIKit(VideoMode mode,
     } else {
         dispatch_sync(dispatch_get_main_queue(), ^{ setup(); });
     }
+
+    // mkxp-ios: iOS has no mouse, so the pointer is never in the
+    // window. PSDK's Mouse module assumes the opposite. It starts with
+    // @in_screen = true on every platform but Android, and only a
+    // MouseLeft event clears it, so it draws its cursor sprite at 0,0
+    // for the whole game. The event waits in the queue until the first
+    // poll, which comes after the game registers its handler.
+    Event mouseLeft;
+    mouseLeft.type = Event::MouseLeft;
+    pushEvent(mouseLeft);
 }
 
 
