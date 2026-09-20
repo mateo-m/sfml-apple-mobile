@@ -240,10 +240,20 @@ void WindowBase::setSize(const Vector2u& size)
     {
         m_impl->setSize(size);
 
+#ifndef SFML_SYSTEM_IOS
         // Cache the new size
         m_size.x = size.x;
         m_size.y = size.y;
         recordWindowSize(m_size.x, m_size.y);
+#else
+        // mkxp-ios: iOS gives an app the whole screen and grants no
+        // resize, so WindowImplUIKit::setSize only turns the status
+        // bar. Caching the request would put the size the caller asked
+        // for in the number the drawing code multiplies its view
+        // fractions by. A game that sets a window scale would then draw
+        // its picture in a rectangle of its own resolution, in a corner
+        // of the screen. SFView's layout writes the real size.
+#endif
 
         // Notify the derived class
         onResize();
