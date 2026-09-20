@@ -41,6 +41,36 @@
     #endif
 #endif
 
+// mkxp-ios: a host app reparents the game view into its own window, so
+// it needs the UIWindow this backend made. The backend is private and
+// [SFAppDelegate getInstance] builds a delegate when none exists, so
+// record the window where it is created and hand back that one.
+//
+// A plain pointer. This file has no ARC, the window keeps the +1 from
+// its own alloc, and ~WindowImplUIKit releases nothing, so the window
+// outlives every reader.
+static UIWindow* g_gameWindow;
+
+static void sfml_ios_setGameWindow(UIWindow* window)
+{
+    g_gameWindow = window;
+}
+
+extern "C" void* sfml_ios_game_window()
+{
+    return (__bridge void*)g_gameWindow;
+}
+
+// mkxp-ios: a host app reads the window size in pixels and reports the
+// picture rect in points, so it needs this factor to convert. The value
+// comes from the main thread, where UIScreen may be read.
+static float g_backingScale = 1;
+
+extern "C" float sfml_ios_backing_scale()
+{
+    return g_backingScale;
+}
+
 namespace sf
 {
 namespace priv
@@ -71,6 +101,7 @@ WindowImplUIKit::WindowImplUIKit(VideoMode mode,
     // avoid the deadlock dispatch_sync_to_self_queue would cause.
     auto setup = [&]() {
         m_backingScale = static_cast<float>([SFAppDelegate getInstance].backingScaleFactor);
+        g_backingScale = m_backingScale;
 
         // Apply the fullscreen flag
         [UIApplication sharedApplication].statusBarHidden = !(style & Style::Titlebar) || (style & Style::Fullscreen);
@@ -172,6 +203,7 @@ WindowImplUIKit::WindowImplUIKit(VideoMode mode,
 
         // Make it the current window
         [m_window makeKeyAndVisible];
+        sfml_ios_setGameWindow(m_window);
     };
 
     if ([NSThread isMainThread]) {

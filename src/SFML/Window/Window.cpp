@@ -212,11 +212,20 @@ bool Window::setActive(bool active) const
 
 
 ////////////////////////////////////////////////////////////
+// mkxp-ios: a host app lifts its loading screen on the first frame the
+// game draws. Weak, because SFML links without the PSDK core in every
+// other build of this tree.
+extern "C" __attribute__((weak)) void psdk_frame_rendered();
+
 void Window::display()
 {
     // Display the backbuffer on screen
     if (setActive())
+    {
         m_context->display();
+        if (psdk_frame_rendered)
+            psdk_frame_rendered();
+    }
 
     // Limit the framerate if needed
     if (m_frameTimeLimit != Time::Zero)
