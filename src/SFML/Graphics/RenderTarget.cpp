@@ -39,6 +39,7 @@
 #include <cassert>
 #include <iostream>
 #include <algorithm>
+#include <atomic>
 #include <map>
 
 
@@ -152,7 +153,46 @@ namespace
 namespace sf
 {
 ////////////////////////////////////////////////////////////
+namespace
+{
+// mkxp-ios: the part of the app window the picture may use, as fractions
+// of the window with the origin at the top left. The whole window is the
+// start value.
+//
+// One 64 bit word holds all four numbers, so a draw on the game thread
+// reads the four of them from the same set. Four separate atomics would
+// let a frame read two numbers from the old region and two from the new
+// one, and put the picture outside the window for that frame.
+std::atomic<sf::Uint64> outputRegionBits(0xFFFFFFFF00000000ULL);
+
+sf::Uint64 packRegion(float x, float y, float width, float height)
+{
+    const float clamped[4] = { std::max(0.f, std::min(1.f, x)),
+                               std::max(0.f, std::min(1.f, y)),
+                               std::max(0.f, std::min(1.f, width)),
+                               std::max(0.f, std::min(1.f, height)) };
+    sf::Uint64 bits = 0;
+    for (int i = 0; i < 4; ++i)
+        bits |= static_cast<sf::Uint64>(clamped[i] * 65535.f + 0.5f) << (16 * i);
+    return bits;
+}
+
+void unpackRegion(sf::Uint64 bits, float out[4])
+{
+    for (int i = 0; i < 4; ++i)
+        out[i] = static_cast<float>((bits >> (16 * i)) & 0xFFFF) / 65535.f;
+}
+}
+
+// mkxp-ios: the host app calls this. A region of 0, 0, 1, 1 gives the
+// whole window back.
+extern "C" void sfml_set_output_region(float x, float y, float width, float height)
+{
+    outputRegionBits.store(packRegion(x, y, width, height), std::memory_order_relaxed);
+}
+
 RenderTarget::RenderTarget() :
+m_appWindowTarget(false),
 m_defaultView(),
 m_view       (),
 m_cache      (),
@@ -209,7 +249,21 @@ IntRect RenderTarget::getViewport(const View& view) const
 {
     float width  = static_cast<float>(getSize().x);
     float height = static_cast<float>(getSize().y);
-    const FloatRect& viewport = view.getViewport();
+    FloatRect viewport = view.getViewport();
+
+    // mkxp-ios: every view's viewport is a fraction of the target, so the
+    // output region composes with it. A Viewport inside the picture then
+    // lands inside the same region, and a view that asks for the whole
+    // target gets the region.
+    if (m_appWindowTarget)
+    {
+        float region[4];
+        unpackRegion(outputRegionBits.load(std::memory_order_relaxed), region);
+        viewport.left   = region[0] + viewport.left * region[2];
+        viewport.top    = region[1] + viewport.top  * region[3];
+        viewport.width *= region[2];
+        viewport.height *= region[3];
+    }
 
     return IntRect(static_cast<int>(0.5f + width  * viewport.left),
                    static_cast<int>(0.5f + height * viewport.top),

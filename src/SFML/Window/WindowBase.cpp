@@ -30,6 +30,8 @@
 #include <SFML/Window/WindowImpl.hpp>
 #include <SFML/System/Err.hpp>
 
+#include <atomic>
+
 
 namespace
 {
@@ -38,6 +40,28 @@ namespace
     {
         const sf::WindowBase* fullscreenWindow = NULL;
     }
+
+    // mkxp-ios: a host app puts the picture in part of the window and asks
+    // for the window size to work out where. This is the same number the
+    // drawing code multiplies its view fractions by, so both sides agree.
+    // iOS runs one window for each process, so one pair of numbers holds
+    // every window it makes.
+    std::atomic<unsigned int> recordedWidth(0);
+    std::atomic<unsigned int> recordedHeight(0);
+
+    void recordWindowSize(unsigned int width, unsigned int height)
+    {
+        recordedWidth.store(width, std::memory_order_relaxed);
+        recordedHeight.store(height, std::memory_order_relaxed);
+    }
+}
+
+extern "C" void sfml_window_pixel_size(unsigned int* width, unsigned int* height)
+{
+    if (width)
+        *width = recordedWidth.load(std::memory_order_relaxed);
+    if (height)
+        *height = recordedHeight.load(std::memory_order_relaxed);
 }
 
 
@@ -219,6 +243,7 @@ void WindowBase::setSize(const Vector2u& size)
         // Cache the new size
         m_size.x = size.x;
         m_size.y = size.y;
+        recordWindowSize(m_size.x, m_size.y);
 
         // Notify the derived class
         onResize();
@@ -333,6 +358,7 @@ void WindowBase::onResize()
 }
 
 
+
 ////////////////////////////////////////////////////////////
 bool WindowBase::filterEvent(const Event& event)
 {
@@ -342,6 +368,7 @@ bool WindowBase::filterEvent(const Event& event)
         // Cache the new size
         m_size.x = event.size.width;
         m_size.y = event.size.height;
+        recordWindowSize(m_size.x, m_size.y);
 
         // Notify the derived class
         onResize();
@@ -361,6 +388,7 @@ void WindowBase::initialize()
 
     // Get and cache the initial size of the window
     m_size = m_impl->getSize();
+    recordWindowSize(m_size.x, m_size.y);
 
     // Notify the derived class
     onCreate();
