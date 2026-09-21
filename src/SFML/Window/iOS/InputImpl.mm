@@ -51,6 +51,11 @@ namespace
 // global lock that could starve the render loop.
 std::array<std::atomic<bool>, sf::Keyboard::KeyCount> g_syntheticKeys{};
 std::array<std::atomic<bool>, sf::Keyboard::Scan::ScancodeCount> g_syntheticScans{};
+
+// mkxp-ios: the host that shows the keyboard. See
+// sfml_ios_set_virtual_keyboard_callback below.
+std::atomic<void (*)(int, void*)> g_virtualKeyboardCallback{nullptr};
+std::atomic<void*>                g_virtualKeyboardUserdata{nullptr};
 }
 
 
@@ -222,6 +227,16 @@ String InputImpl::getDescription(Keyboard::Scancode /* code */)
 ////////////////////////////////////////////////////////////
 void InputImpl::setVirtualKeyboardVisible(bool visible)
 {
+    // mkxp-ios: a host with its own keyboard takes the call instead. The
+    // SFML path makes the game view the first responder, and a view that
+    // does that also makes its window the key window. A host that keeps
+    // its own window above this one would lose its touches to that.
+    if (auto callback = g_virtualKeyboardCallback.load(std::memory_order_acquire))
+    {
+        callback(visible ? 1 : 0, g_virtualKeyboardUserdata.load(std::memory_order_acquire));
+        return;
+    }
+
     [[SFAppDelegate getInstance] setVirtualKeyboardVisible:visible];
 }
 
@@ -336,4 +351,16 @@ extern "C" void sfml_ios_inject_key_event(int sfScan, int pressed)
 extern "C" void sfml_ios_inject_character(unsigned int unicode)
 {
     [[SFAppDelegate getInstance] notifyCharacter:unicode];
+}
+
+// mkxp-ios: a host that shows its own keyboard registers here, and
+// takes every later sf::Keyboard::setVirtualKeyboardVisible call. That
+// call is the only signal a game gives before it reads typed text
+// (LiteRGSS / PSDK's `Input.open_virtual_keyboard`), so the host needs
+// it to know when to put the keyboard up. Pass a null callback to give
+// the keyboard back to SFML.
+extern "C" void sfml_ios_set_virtual_keyboard_callback(void (*callback)(int, void*), void* userdata)
+{
+    g_virtualKeyboardUserdata.store(userdata, std::memory_order_release);
+    g_virtualKeyboardCallback.store(callback, std::memory_order_release);
 }
