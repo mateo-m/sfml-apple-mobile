@@ -212,9 +212,15 @@ bool Window::setActive(bool active) const
 
 
 ////////////////////////////////////////////////////////////
-// mkxp-ios: a host app lifts its loading screen on the first frame the
-// game draws. Weak, because SFML links without the PSDK core in every
-// other build of this tree.
+// A host app lifts its loading screen on the first frame the game draws,
+// and reads the finished frame here when it pauses. Weak, because SFML
+// links without the PSDK core in every other build of this tree.
+//
+// The call sits BEFORE the swap on purpose. ANGLE creates the iOS window
+// surface with no EGL_SWAP_BEHAVIOR attribute, so the default
+// EGL_BUFFER_DESTROYED applies and the pixels are gone after
+// m_context->display(). The cost is that the host learns about a frame
+// up to one refresh before the screen shows it.
 extern "C" __attribute__((weak)) void psdk_frame_rendered();
 
 void Window::display()
@@ -222,9 +228,9 @@ void Window::display()
     // Display the backbuffer on screen
     if (setActive())
     {
-        m_context->display();
         if (psdk_frame_rendered)
             psdk_frame_rendered();
+        m_context->display();
     }
 
     // Limit the framerate if needed
