@@ -316,10 +316,23 @@ if ((NOT ${CMAKE_VERSION} VERSION_LESS 3.11) AND (NOT OpenGL_GL_PREFERENCE))
 endif()
 
 if(SFML_OS_IOS)
-    # ANGLE replaces the deprecated -framework OpenGLES path.
+    # ANGLE replaces the EAGL path. Not because EAGL is deprecated.
+    # OpenGLES.framework still ships in the iOS 27 SDK for device and
+    # simulator, so a deprecation warning is all Apple gives you.
+    #
+    # The real reason came from mkxp-z. Fast rotation on the iOS
+    # Simulator killed the app with SIGSEGV inside libGLImage.dylib,
+    # which is Apple's GLES emulation for the simulator. It still
+    # happened with the renderbuffer resize disabled, with the view
+    # frame frozen, and with every GL call removed from the resize
+    # path. It did not happen on a device. ANGLE draws through Metal
+    # and never loads libGLImage.dylib, so the crash cannot occur.
+    # SFML moved to ANGLE three weeks later to keep one GL path in
+    # the app. See ios/Dependencies/common.make for the same note.
+    #
     # Empo provides the static libs under ios/Dependencies/ANGLE/
-    # and surfaces them via SFML_IOS_ANGLE_DIR (set from the
-    # outer common.make rule).
+    # and gives them to SFML through SFML_IOS_ANGLE_DIR, which the
+    # outer common.make rule sets.
     if(NOT DEFINED SFML_IOS_ANGLE_DIR)
         message(FATAL_ERROR "SFML iOS build requires SFML_IOS_ANGLE_DIR pointing at an ANGLE distribution (iphonesimulator/ or iphoneos/).")
     endif()
