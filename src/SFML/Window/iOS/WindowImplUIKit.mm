@@ -151,9 +151,9 @@ WindowImplUIKit::WindowImplUIKit(VideoMode mode,
         {
             m_window = [[UIWindow alloc] initWithFrame:frame];
         }
-        // Keep the SFML window below the host's transparent overlay
-        // (Empo's AppWindow at UIWindowLevelNormal + 1), which holds
-        // the on-screen gamepad. The overlay's hit-test returns nil
+        // Keep the SFML window below a host's transparent overlay
+        // (a window at UIWindowLevelNormal + 1), which can hold an
+        // on-screen gamepad. The overlay's hit-test returns nil
         // for non-control regions, so taps still reach
         // SFView::touchesBegan:.
         m_window.windowLevel = UIWindowLevelNormal;

@@ -30,6 +30,7 @@
 #include <SFML/Window/WindowImpl.hpp>
 #include <SFML/System/Sleep.hpp>
 #include <SFML/System/Err.hpp>
+#include <atomic>
 
 
 namespace sf
@@ -212,24 +213,33 @@ bool Window::setActive(bool active) const
 
 
 ////////////////////////////////////////////////////////////
-// A host app lifts its loading screen on the first frame the game draws,
-// and reads the finished frame here when it pauses. Weak, because SFML
-// links without the PSDK core in every other build of this tree.
+// mkxp-ios: a host app lifts its loading screen on the first frame the
+// game draws, and reads the finished frame when it pauses.
 //
 // The call sits BEFORE the swap on purpose. ANGLE creates the iOS window
 // surface with no EGL_SWAP_BEHAVIOR attribute, so the default
 // EGL_BUFFER_DESTROYED applies and the pixels are gone after
 // m_context->display(). The cost is that the host learns about a frame
 // up to one refresh before the screen shows it.
-extern "C" __attribute__((weak)) void psdk_frame_rendered();
+namespace
+{
+    std::atomic<void (*)(void*)> beforeSwapCallback(NULL);
+    std::atomic<void*>           beforeSwapUserdata(NULL);
+}
+
+extern "C" void sfml_set_before_swap_callback(void (*callback)(void*), void* userdata)
+{
+    beforeSwapUserdata.store(userdata, std::memory_order_release);
+    beforeSwapCallback.store(callback, std::memory_order_release);
+}
 
 void Window::display()
 {
     // Display the backbuffer on screen
     if (setActive())
     {
-        if (psdk_frame_rendered)
-            psdk_frame_rendered();
+        if (void (*callback)(void*) = beforeSwapCallback.load(std::memory_order_acquire))
+            callback(beforeSwapUserdata.load(std::memory_order_acquire));
         m_context->display();
     }
 

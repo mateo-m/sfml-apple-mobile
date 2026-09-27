@@ -191,6 +191,16 @@ extern "C" void sfml_set_output_region(float x, float y, float width, float heig
     outputRegionBits.store(packRegion(x, y, width, height), std::memory_order_relaxed);
 }
 
+extern "C" void sfml_get_output_region(float* x, float* y, float* width, float* height)
+{
+    float region[4];
+    unpackRegion(outputRegionBits.load(std::memory_order_relaxed), region);
+    *x = region[0];
+    *y = region[1];
+    *width = region[2];
+    *height = region[3];
+}
+
 RenderTarget::RenderTarget() :
 m_appWindowTarget(false),
 m_defaultView(),
