@@ -34,6 +34,7 @@
 #include <SFML/System/Mutex.hpp>
 #include <SFML/System/Lock.hpp>
 #include <SFML/System/Err.hpp>
+#include <atomic>
 #include <cassert>
 #include <cstring>
 #include <climits>
@@ -68,16 +69,20 @@ namespace
 // mkxp-ios: a host app lets the player pick a smooth or a sharp picture.
 // The picture scales up from the game's own resolution with the GL
 // viewport, so the filter of each texture decides how the whole picture
-// looks. The host app defines this function. A build without one links,
-// because the symbol is weak, and keeps the sharp picture.
-extern "C" __attribute__((weak)) int psdk_smooth_scaling_enabled(void);
-
+// looks. A texture reads the value when it is made.
 namespace
 {
-    bool defaultSmooth()
-    {
-        return psdk_smooth_scaling_enabled && psdk_smooth_scaling_enabled() != 0;
-    }
+    std::atomic<bool> defaultSmoothValue(false);
+}
+
+extern "C" void sfml_set_default_smooth(int smooth)
+{
+    defaultSmoothValue.store(smooth != 0, std::memory_order_relaxed);
+}
+
+extern "C" int sfml_default_smooth()
+{
+    return defaultSmoothValue.load(std::memory_order_relaxed) ? 1 : 0;
 }
 
 namespace sf
@@ -87,7 +92,7 @@ Texture::Texture() :
 m_size         (0, 0),
 m_actualSize   (0, 0),
 m_texture      (0),
-m_isSmooth     (defaultSmooth()),
+m_isSmooth     (sfml_default_smooth() != 0),
 m_sRgb         (false),
 m_isRepeated   (false),
 m_pixelsFlipped(false),
