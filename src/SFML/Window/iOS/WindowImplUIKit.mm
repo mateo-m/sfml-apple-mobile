@@ -41,7 +41,7 @@
     #endif
 #endif
 
-// mkxp-ios: a host app reparents the game view into its own window, so
+// apple-mobile: a host app reparents the game view into its own window, so
 // it needs the UIWindow this backend made. The backend is private and
 // [SFAppDelegate getInstance] builds a delegate when none exists, so
 // record the window where it is created and hand back that one.
@@ -61,7 +61,7 @@ extern "C" void* sfml_ios_game_window()
     return (__bridge void*)g_gameWindow;
 }
 
-// mkxp-ios: a host app reads the window size in pixels and reports the
+// apple-mobile: a host app reads the window size in pixels and reports the
 // picture rect in points, so it needs this factor to convert. The value
 // comes from the main thread, where UIScreen may be read.
 static float g_backingScale = 1;
@@ -88,7 +88,7 @@ WindowImplUIKit::WindowImplUIKit(VideoMode mode,
                                  unsigned long style,
                                  const ContextSettings& /* settings */)
 {
-    // mkxp-ios: every UIKit / UIWindow / UIView operation has to
+    // apple-mobile: every UIKit / UIWindow / UIView operation has to
     // happen on the main thread or UIApplication throws
     // NSInternalInconsistencyException ("Call must be made on main
     // thread"). LiteRGSS / mkxp drive the engine from a worker
@@ -114,7 +114,7 @@ WindowImplUIKit::WindowImplUIKit(VideoMode mode,
 
         // Create the window
         CGRect frame = [UIScreen mainScreen].bounds; // Ignore user size, it wouldn't make sense to use something else
-        // mkxp-ios: on iOS 13+ multi-scene apps, a UIWindow created
+        // apple-mobile: on iOS 13+ multi-scene apps, a UIWindow created
         // with -initWithFrame: doesn't attach to any UIWindowScene
         // and never lays out / displays. Find the active foreground
         // scene from the host app and bind the SFML window to it so
@@ -173,7 +173,7 @@ WindowImplUIKit::WindowImplUIKit(VideoMode mode,
         m_view = [[SFView alloc] initWithFrame:viewRect andContentScaleFactor:(static_cast<double>(m_backingScale))];
         [m_view resignFirstResponder];
 
-        // Create the view controller. mkxp-ios: original SFML code
+        // Create the view controller. apple-mobile: original SFML code
         // had `[SFViewController alloc]` without an `init`, leaving
         // the UIViewController without its designated initializer
         // run. UIKit then misroutes a number of calls (view loading,
@@ -212,7 +212,7 @@ WindowImplUIKit::WindowImplUIKit(VideoMode mode,
         dispatch_sync(dispatch_get_main_queue(), ^{ setup(); });
     }
 
-    // mkxp-ios: iOS has no mouse, so the pointer is never in the
+    // apple-mobile: iOS has no mouse, so the pointer is never in the
     // window. PSDK's Mouse module assumes the opposite. It starts with
     // @in_screen = true on every platform but Android, and only a
     // MouseLeft event clears it, so it draws its cursor sprite at 0,0

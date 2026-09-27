@@ -398,7 +398,7 @@ bool EaglContext::makeCurrent(bool current)
         if (eglMakeCurrent(display, surface, surface, context) == EGL_TRUE)
             return true;
 
-        // mkxp-ios: log the actual EGL error code on first failure
+        // apple-mobile: log the actual EGL error code on first failure
         // so we can distinguish bad surface vs bad context vs not
         // current thread vs surface-was-destroyed cases. After the
         // first time we just log nothing — the SFML render loop

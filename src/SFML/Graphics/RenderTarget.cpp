@@ -155,7 +155,7 @@ namespace sf
 ////////////////////////////////////////////////////////////
 namespace
 {
-// mkxp-ios: the part of the app window the picture may use, as fractions
+// apple-mobile: the part of the app window the picture may use, as fractions
 // of the window with the origin at the top left. The whole window is the
 // start value.
 //
@@ -184,7 +184,7 @@ void unpackRegion(sf::Uint64 bits, float out[4])
 }
 }
 
-// mkxp-ios: the host app calls this. A region of 0, 0, 1, 1 gives the
+// apple-mobile: the host app calls this. A region of 0, 0, 1, 1 gives the
 // whole window back.
 extern "C" void sfml_set_output_region(float x, float y, float width, float height)
 {
@@ -261,7 +261,7 @@ IntRect RenderTarget::getViewport(const View& view) const
     float height = static_cast<float>(getSize().y);
     FloatRect viewport = view.getViewport();
 
-    // mkxp-ios: every view's viewport is a fraction of the target, so the
+    // apple-mobile: every view's viewport is a fraction of the target, so the
     // output region composes with it. A Viewport inside the picture then
     // lands inside the same region, and a view that asks for the whole
     // target gets the region.

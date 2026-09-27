@@ -37,7 +37,7 @@
 
 namespace
 {
-// mkxp-ios: synthetic key-state bitsets the host fills via the C
+// apple-mobile: synthetic key-state bitsets the host fills via the C
 // shim below. Touchscreens have no physical keyboard so a polling
 // caller like LiteRGSS / PSDK's `Sf::Keyboard.press?(key)` would
 // otherwise always read `false`. The host's on-screen gamepad
@@ -52,7 +52,7 @@ namespace
 std::array<std::atomic<bool>, sf::Keyboard::KeyCount> g_syntheticKeys{};
 std::array<std::atomic<bool>, sf::Keyboard::Scan::ScancodeCount> g_syntheticScans{};
 
-// mkxp-ios: the host that shows the keyboard. See
+// apple-mobile: the host that shows the keyboard. See
 // sfml_ios_set_virtual_keyboard_callback below.
 std::atomic<void (*)(int, void*)> g_virtualKeyboardCallback{nullptr};
 std::atomic<void*>                g_virtualKeyboardUserdata{nullptr};
@@ -227,7 +227,7 @@ String InputImpl::getDescription(Keyboard::Scancode /* code */)
 ////////////////////////////////////////////////////////////
 void InputImpl::setVirtualKeyboardVisible(bool visible)
 {
-    // mkxp-ios: a host with its own keyboard takes the call instead. The
+    // apple-mobile: a host with its own keyboard takes the call instead. The
     // SFML path makes the game view the first responder, and a view that
     // does that also makes its window the key window. A host that keeps
     // its own window above this one would lose its touches to that.
@@ -301,7 +301,7 @@ Vector2i InputImpl::getTouchPosition(unsigned int finger, const WindowBase& /* r
 
 } // namespace sf
 
-// mkxp-ios: C-linkage shim the host calls from its on-screen gamepad
+// apple-mobile: C-linkage shim the host calls from its on-screen gamepad
 // (or any other touch UI) to inject synthetic key presses + releases
 // that engines polling `sf::Keyboard::isKeyPressed` (e.g. LiteRGSS /
 // PSDK) can observe. Out-of-range keys are silently ignored so the
@@ -322,7 +322,7 @@ extern "C" void sfml_ios_inject_scancode(int sfScan, int pressed)
     g_syntheticScans[static_cast<size_t>(sfScan)].store(pressed != 0, std::memory_order_release);
 }
 
-// mkxp-ios: the event queue and isKeyPressed share no state in this
+// apple-mobile: the event queue and isKeyPressed share no state in this
 // backend. PSDK reads both. LiteRGSS takes the event through
 // `on_key_pressed`, then `Input.press?` asks isKeyPressed on every frame
 // (SfKeyBoard.cpp:8). An event alone leaves that answer false, so the
@@ -341,7 +341,7 @@ extern "C" void sfml_ios_inject_key_event(int sfScan, int pressed)
         [[SFAppDelegate getInstance] notifyKeyUp:scancode];
 }
 
-// mkxp-ios: push a sf::Event::TextEntered with `unicode` so engines
+// apple-mobile: push a sf::Event::TextEntered with `unicode` so engines
 // reading typed characters via `Window.on_text_entered` (LiteRGSS /
 // PSDK's `Input.get_text`, name entry, chat boxes, ...) see input
 // from the host's iOS keyboard. The system keyboard fires character
@@ -353,7 +353,7 @@ extern "C" void sfml_ios_inject_character(unsigned int unicode)
     [[SFAppDelegate getInstance] notifyCharacter:unicode];
 }
 
-// mkxp-ios: a host that shows its own keyboard registers here, and
+// apple-mobile: a host that shows its own keyboard registers here, and
 // takes every later sf::Keyboard::setVirtualKeyboardVisible call. That
 // call is the only signal a game gives before it reads typed text
 // (LiteRGSS / PSDK's `Input.open_virtual_keyboard`), so the host needs

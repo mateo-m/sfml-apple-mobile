@@ -125,7 +125,7 @@ void RenderWindow::onCreate()
         glCheck(glGetIntegerv(GLEXT_GL_FRAMEBUFFER_BINDING, reinterpret_cast<GLint*>(&m_defaultFrameBuffer)));
     }
 
-    // mkxp-ios: the output region applies to the app window only.
+    // apple-mobile: the output region applies to the app window only.
     m_appWindowTarget = true;
 
     // Just initialize the render target part

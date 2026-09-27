@@ -570,7 +570,7 @@ void Font::cleanup()
 ////////////////////////////////////////////////////////////
 Font::Page& Font::loadPage(unsigned int characterSize) const
 {
-    // mkxp-ios: replaced the original `find/insert(make_pair(...))` pair
+    // apple-mobile: replaced the original `find/insert(make_pair(...))` pair
     // with piecewise_construct emplace so the new Page is constructed
     // IN-PLACE in the map instead of going through Page's copy
     // constructor. The copy constructor invokes Texture's copy
@@ -872,7 +872,7 @@ nextRow(3)
 {
     // Make sure that the texture is initialized by default
     sf::Image image;
-    // mkxp-ios: SFML's default 128x128 starting page triggers
+    // apple-mobile: SFML's default 128x128 starting page triggers
     // a Texture::update(const Texture&) growth path the first time
     // the user renders enough glyphs to overflow it. On the iOS port
     // built against ANGLE's libGLESv2, that growth path's CPU readback

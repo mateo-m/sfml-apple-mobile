@@ -66,7 +66,7 @@ namespace
 }
 
 
-// mkxp-ios: a host app lets the player pick a smooth or a sharp picture.
+// apple-mobile: a host app lets the player pick a smooth or a sharp picture.
 // The picture scales up from the game's own resolution with the GL
 // viewport, so the filter of each texture decides how the whole picture
 // looks. A texture reads the value when it is made.

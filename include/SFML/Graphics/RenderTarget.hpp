@@ -391,7 +391,7 @@ protected:
     ////////////////////////////////////////////////////////////
     void initialize();
 
-    // mkxp-ios: true when this target is the app window. The host app's
+    // apple-mobile: true when this target is the app window. The host app's
     // output region names a place in that window, so it applies here and
     // never to a RenderTexture. sfml_set_output_region sets the region.
     bool m_appWindowTarget;

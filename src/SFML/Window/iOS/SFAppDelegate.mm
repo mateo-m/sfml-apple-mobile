@@ -42,7 +42,7 @@ namespace
 
 @interface SFAppDelegate()
 
-// mkxp-ios: see SFView.mm for the MRC vs ARC default-ownership
+// apple-mobile: see SFView.mm for the MRC vs ARC default-ownership
 // rationale. CMMotionManager is allocated via `[[CMMotionManager
 // alloc] init]` so the +1 retain count survives the assignment,
 // but a later `self.motionManager = ...` site would leak under
@@ -147,7 +147,7 @@ namespace
 ////////////////////////////////////////////////////////////
 - (void)initBackingScale
 {
-    // mkxp-ios: upstream reads NSHighResolutionCapable and falls back to
+    // apple-mobile: upstream reads NSHighResolutionCapable and falls back to
     // 1. That key is a macOS key. UIKit ignores it, and a view on iOS
     // takes the screen scale by default, so the fallback gave a drawable
     // at a third of the screen on a 3x phone. iOS then stretched that
