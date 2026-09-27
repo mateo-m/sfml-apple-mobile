@@ -40,5 +40,5 @@ build/
 .vscode/
 .idea/
 
-# Empo build folders (common.make CMAKE_BUILDDIR)
+# The cmake build folders of an out-of-tree iOS build
 cmakebuild-*/

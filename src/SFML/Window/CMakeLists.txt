@@ -328,11 +328,10 @@ if(SFML_OS_IOS)
     # path. It did not happen on a device. ANGLE draws through Metal
     # and never loads libGLImage.dylib, so the crash cannot occur.
     # SFML moved to ANGLE three weeks later to keep one GL path in
-    # the app. See ios/Dependencies/common.make for the same note.
+    # the app.
     #
-    # Empo provides the static libs under ios/Dependencies/ANGLE/
-    # and gives them to SFML through SFML_IOS_ANGLE_DIR, which the
-    # outer common.make rule sets.
+    # The build that includes SFML gives the ANGLE headers and static
+    # libs through SFML_IOS_ANGLE_DIR.
     if(NOT DEFINED SFML_IOS_ANGLE_DIR)
         message(FATAL_ERROR "SFML iOS build requires SFML_IOS_ANGLE_DIR pointing at an ANGLE distribution (iphonesimulator/ or iphoneos/).")
     endif()
