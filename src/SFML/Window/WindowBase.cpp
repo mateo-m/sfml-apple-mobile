@@ -41,7 +41,7 @@ namespace
         const sf::WindowBase* fullscreenWindow = NULL;
     }
 
-    // mkxp-ios: a host app puts the picture in part of the window and asks
+    // apple-mobile: a host app puts the picture in part of the window and asks
     // for the window size to work out where. This is the same number the
     // drawing code multiplies its view fractions by, so both sides agree.
     // iOS runs one window for each process, so one pair of numbers holds
@@ -246,7 +246,7 @@ void WindowBase::setSize(const Vector2u& size)
         m_size.y = size.y;
         recordWindowSize(m_size.x, m_size.y);
 #else
-        // mkxp-ios: iOS gives an app the whole screen and grants no
+        // apple-mobile: iOS gives an app the whole screen and grants no
         // resize, so WindowImplUIKit::setSize only turns the status
         // bar. Caching the request would put the size the caller asked
         // for in the number the drawing code multiplies its view

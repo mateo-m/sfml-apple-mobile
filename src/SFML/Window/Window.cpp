@@ -213,7 +213,7 @@ bool Window::setActive(bool active) const
 
 
 ////////////////////////////////////////////////////////////
-// mkxp-ios: a host app lifts its loading screen on the first frame the
+// apple-mobile: a host app lifts its loading screen on the first frame the
 // game draws, and reads the finished frame when it pauses.
 //
 // The call sits BEFORE the swap on purpose. ANGLE creates the iOS window

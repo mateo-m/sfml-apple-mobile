@@ -473,7 +473,7 @@ static void prepareDraw() {
 
     s.fns.useProgram(s.program);
 
-    // MKXP-IOS: SFML's iOS code submits vertex data via client-side
+    // apple-mobile: SFML's iOS code submits vertex data via client-side
     // pointers (no VBO). The GLES2 spec says client-side pointers
     // are valid only when GL_ARRAY_BUFFER==0. If any SFML code path
     // (sf::VertexBuffer, sf::Shape's internal buffers) leaves a VBO

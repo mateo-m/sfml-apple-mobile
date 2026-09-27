@@ -62,7 +62,7 @@ void ensureExtensionsInit()
 #ifdef SFML_OPENGL_ES
         gladLoadGLES1(reinterpret_cast<GLADloadfunc>(sf::Context::getFunction));
 
-        // mkxp-ios: gladLoadGLES1 populates ES 1.1 entry points only.
+        // apple-mobile: gladLoadGLES1 populates ES 1.1 entry points only.
         // ANGLE's libGLESv2 exports the core ES2+ framebuffer functions
         // (glGenFramebuffers, glBindFramebuffer, glReadPixels via FBO,
         // ...) but NOT their OES_framebuffer_object aliases that
@@ -98,7 +98,7 @@ void ensureExtensionsInit()
         if (auto p = load("glGenerateMipmap"))
             sf_glad_glGenerateMipmapOES = reinterpret_cast<PFNGLGENERATEMIPMAPOESPROC>(p);
 
-        // mkxp-ios: ANGLE-on-Metal advertises GLES2 / EGL_KHR_image
+        // apple-mobile: ANGLE-on-Metal advertises GLES2 / EGL_KHR_image
         // etc., NOT the GLES1-era GL_OES_framebuffer_object extension
         // string. SFML's `RenderTextureImplFBO::isAvailable()` keys
         // off `SF_GLAD_GL_OES_framebuffer_object`, which glad parses
@@ -115,7 +115,7 @@ void ensureExtensionsInit()
         // FBO path.
         SF_GLAD_GL_OES_framebuffer_object = 1;
 
-        // mkxp-ios: install our GLES1 fixed-function emulator on top
+        // apple-mobile: install our GLES1 fixed-function emulator on top
         // of the active GLES2 context. ANGLE's own GLES1-on-Metal
         // emulator crashes during the first FBO setup; we sidestep
         // it by intercepting SFML's glad pointers and re-implementing

@@ -35,7 +35,7 @@
 
 @interface SFView()
 
-// mkxp-ios: SFML's cmake enables ARC via `sfml_set_xcode_property
+// apple-mobile: SFML's cmake enables ARC via `sfml_set_xcode_property
 // CLANG_ENABLE_OBJC_ARC YES`, but that property only takes effect
 // under the Xcode generator. With Unix Makefiles / Ninja the .mm
 // files compile under MRC, where `@property (nonatomic)` defaults
@@ -180,7 +180,7 @@
 ////////////////////////////////////////////////////////////
 - (void)layoutSubviews
 {
-    // mkxp-ios: the drawable takes this view's size, and the window
+    // apple-mobile: the drawable takes this view's size, and the window
     // keeps its own copy of that size for the drawing code. Upstream
     // updates the copy from the device orientation notification. That
     // path asks the root view controller for permission first, and a
@@ -250,7 +250,7 @@
         metalLayer.drawableSize = CGSizeMake(
             frame.size.width * factor, frame.size.height * factor);
         metalLayer.pixelFormat = MTLPixelFormatBGRA8Unorm;
-        // mkxp-ios: ANGLE-on-Metal needs the CAMetalLayer to have an
+        // apple-mobile: ANGLE-on-Metal needs the CAMetalLayer to have an
         // explicit MTLDevice set; without it nextDrawable returns nil
         // and eglSwapBuffers reports success but nothing reaches the
         // display (visible as "container bg shows through but layer
