@@ -132,6 +132,15 @@
             m_requester->textEntered(127);
         }
 
+        // Return and keypad Enter
+        else if ((keycode == 0x24) || (keycode == 0x4C))
+        {
+            // apple-mobile: the hidden view gives 10. Windows and Linux send
+            // 13, and PSDK's name screen confirms only on 13.
+            m_requester->textEntered(13);
+            [m_hiddenTextView setString:@""];
+        }
+
         // Otherwise, let's see what our hidden field has computed
         else
         {
@@ -145,6 +154,16 @@
             [m_hiddenTextView setString:@""];
         }
     }
+}
+
+
+////////////////////////////////////////////////////////
+-(void)keyUp:(NSEvent*)theEvent
+{
+    // apple-mobile: only SFApplication's sendEvent calls sfKeyUp. A host
+    // app with its own NSApplication class sends key up here, and without
+    // this method SFML keeps every key held.
+    [self sfKeyUp:theEvent];
 }
 
 
