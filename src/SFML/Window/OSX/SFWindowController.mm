@@ -107,7 +107,7 @@
         m_requester = 0;
         m_fullscreen = NO; // assuming this is the case... too hard to handle anyway.
         m_restoreResize = NO;
-        m_highDpi = NO;
+        m_highDpi = YES;
 
         // Retain the window for our own use.
         m_window = [window retain];
@@ -163,7 +163,9 @@
         m_requester = 0;
         m_fullscreen = ((style & sf::Style::Fullscreen) != 0) ? YES : NO;
         m_restoreResize = NO;
-        m_highDpi = NO;
+        // apple-mobile: draw at the screen's full resolution. getSize and
+        // the events give pixels, through scaleOutXY.
+        m_highDpi = YES;
 
         if (m_fullscreen)
             [self setupFullscreenViewWithMode:mode];
