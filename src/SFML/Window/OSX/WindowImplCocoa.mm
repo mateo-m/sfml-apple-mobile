@@ -29,6 +29,7 @@
 #include <SFML/Window/OSX/AutoreleasePoolWrapper.hpp>
 #include <SFML/Window/OSX/WindowImplCocoa.hpp>
 #include <SFML/Window/OSX/InputImpl.hpp>
+#include <SFML/Window/Keyboard.hpp>
 #include <SFML/System/Err.hpp>
 
 #import <SFML/Window/OSX/cpp_objc_conversion.h>
@@ -38,6 +39,44 @@
 #import <SFML/Window/OSX/SFKeyboardModifiersHelper.h>
 #import <SFML/Window/OSX/SFViewController.h>
 #import <SFML/Window/OSX/SFWindowController.h>
+
+// apple-mobile: the window that the game made last. A host app adopts
+// it, and sends it the keys of its game controllers.
+static sf::priv::WindowImplCocoa* gameWindow;
+
+extern "C" void* sfml_macos_game_window()
+{
+    return gameWindow ? reinterpret_cast<void*>(gameWindow->getSystemHandle()) : NULL;
+}
+
+extern "C" float sfml_macos_backing_scale()
+{
+    if (!gameWindow)
+        return 0;
+    NSWindow* window = static_cast<NSWindow*>(gameWindow->getSystemHandle());
+    return static_cast<float>([window backingScaleFactor]);
+}
+
+// apple-mobile: call these on the main thread, where the game reads its
+// events on macOS.
+extern "C" void sfml_macos_inject_key_event(int sfScan, int pressed)
+{
+    if (!gameWindow || sfScan < 0 || sfScan >= sf::Keyboard::Scan::ScancodeCount)
+        return;
+    sf::Event::KeyEvent key = {};
+    key.scancode = static_cast<sf::Keyboard::Scancode>(sfScan);
+    key.code = sf::Keyboard::localize(key.scancode);
+    if (pressed)
+        gameWindow->keyDown(key);
+    else
+        gameWindow->keyUp(key);
+}
+
+extern "C" void sfml_macos_inject_character(unsigned int unicode)
+{
+    if (gameWindow)
+        gameWindow->textEntered(static_cast<unichar>(unicode));
+}
 
 namespace sf
 {
@@ -134,6 +173,7 @@ m_showCursor(true)
     m_delegate = [[SFWindowController alloc] initWithMode:mode andStyle:style];
     [m_delegate changeTitle:sfStringToNSString(title)];
     [m_delegate setRequesterTo:this];
+    gameWindow = this;
 
     // Finally, set up keyboard helper
     initialiseKeyboardHelper();
@@ -144,6 +184,8 @@ m_showCursor(true)
 WindowImplCocoa::~WindowImplCocoa()
 {
     AutoreleasePool pool;
+    if (gameWindow == this)
+        gameWindow = NULL;
     [m_delegate closeWindow];
     // Tell the window/view controller (and the OpenGL view) that the delegate
     // (this object) no longer exists to prevent events being sent to the window
