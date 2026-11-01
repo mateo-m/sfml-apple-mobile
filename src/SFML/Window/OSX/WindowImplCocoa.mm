@@ -28,6 +28,7 @@
 ////////////////////////////////////////////////////////////
 #include <SFML/Window/OSX/AutoreleasePoolWrapper.hpp>
 #include <SFML/Window/OSX/WindowImplCocoa.hpp>
+#include <SFML/Window/OSX/InputImpl.hpp>
 #include <SFML/System/Err.hpp>
 
 #import <SFML/Window/OSX/cpp_objc_conversion.h>
@@ -232,6 +233,9 @@ void WindowImplCocoa::windowResized(unsigned int width, unsigned int height)
 ////////////////////////////////////////////////////////////
 void WindowImplCocoa::windowLostFocus(void)
 {
+    // A key released while another window has the focus sends no key up.
+    InputImpl::releaseAllKeys();
+
     if (!m_showCursor && [m_delegate isMouseInside])
         showMouseCursor(); // Make sure the cursor is visible
 
@@ -359,6 +363,8 @@ void WindowImplCocoa::mouseMovedOut(void)
 ////////////////////////////////////////////////////////////
 void WindowImplCocoa::keyDown(Event::KeyEvent key)
 {
+    InputImpl::setKeyHeld(key.scancode, true);
+
     Event event;
     event.type = Event::KeyPressed;
     event.key = key;
@@ -370,6 +376,8 @@ void WindowImplCocoa::keyDown(Event::KeyEvent key)
 ////////////////////////////////////////////////////////////
 void WindowImplCocoa::keyUp(Event::KeyEvent key)
 {
+    InputImpl::setKeyHeld(key.scancode, false);
+
     Event event;
     event.type = Event::KeyReleased;
     event.key = key;
