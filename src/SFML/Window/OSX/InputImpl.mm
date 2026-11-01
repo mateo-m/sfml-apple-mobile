@@ -36,6 +36,9 @@
 #import <SFML/Window/OSX/SFOpenGLView.h>
 #import <AppKit/AppKit.h>
 
+#include <array>
+#include <atomic>
+
 ////////////////////////////////////////////////////////////
 /// In order to keep track of the keyboard's state and mouse buttons' state
 /// we use the HID manager. Mouse position is handled differently.
@@ -121,18 +124,46 @@ SFOpenGLView* getSFOpenGLViewFromSFMLWindow(const WindowBase& window)
 }
 
 
+// apple-mobile: the HID manager reads the keyboard only with the Input
+// Monitoring permission, so a sandboxed app that has not asked for it
+// sees no key as held. LiteRGSS asks isKeyPressed on every frame. The
+// window's own key events and the host's injected keys fill this table.
+namespace
+{
+    std::array<std::atomic<bool>, Keyboard::Scan::ScancodeCount> heldKeys{};
+}
+
+
 ////////////////////////////////////////////////////////////
 bool InputImpl::isKeyPressed(Keyboard::Key key)
 {
-    AutoreleasePool pool;
-    return HIDInputManager::getInstance().isKeyPressed(key);
+    return isKeyPressed(delocalize(key));
 }
 
 
 ////////////////////////////////////////////////////////////
 bool InputImpl::isKeyPressed(Keyboard::Scancode code)
 {
-    return HIDInputManager::getInstance().isKeyPressed(code);
+    if (code == Keyboard::Scan::Unknown)
+        return false;
+    return heldKeys[static_cast<std::size_t>(code)].load(std::memory_order_relaxed);
+}
+
+
+////////////////////////////////////////////////////////////
+void InputImpl::setKeyHeld(Keyboard::Scancode code, bool held)
+{
+    if (code == Keyboard::Scan::Unknown)
+        return;
+    heldKeys[static_cast<std::size_t>(code)].store(held, std::memory_order_relaxed);
+}
+
+
+////////////////////////////////////////////////////////////
+void InputImpl::releaseAllKeys()
+{
+    for (std::atomic<bool>& key : heldKeys)
+        key.store(false, std::memory_order_relaxed);
 }
 
 

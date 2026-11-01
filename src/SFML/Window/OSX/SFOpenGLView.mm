@@ -253,6 +253,22 @@
 
 
 ////////////////////////////////////////////////////////
+-(void)setFrameSize:(NSSize)newSize
+{
+    [super setFrameSize:newSize];
+
+    // apple-mobile: a host app resizes the window, and full screen does
+    // too, with no live resize. viewDidEndLiveResize alone never sends
+    // those sizes.
+    if ((m_requester != 0) && ![self inLiveResize])
+    {
+        [self update];
+        m_requester->windowResized(static_cast<unsigned int>(newSize.width), static_cast<unsigned int>(newSize.height));
+    }
+}
+
+
+////////////////////////////////////////////////////////
 -(void)viewDidEndLiveResize
 {
     // We use viewDidEndLiveResize to notify the user ONCE
